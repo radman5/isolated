@@ -11,17 +11,74 @@ config_version=5
 [application]
 
 config/name="isolated"
+run/main_scene="res://arena.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
+
+[autoload]
+
+Metrics="*res://metrics.gd"
 
 [display]
 
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
-[dotnet]
+[input]
 
-project/assembly_name="isolated"
+move_forward={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":87)
+, Object(InputEventKey,"physical_keycode":4194320)
+, Object(InputEventJoypadMotion,"axis":1,"axis_value":-1.0)
+]
+}
+move_back={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":83)
+, Object(InputEventKey,"physical_keycode":4194322)
+, Object(InputEventJoypadMotion,"axis":1,"axis_value":1.0)
+]
+}
+move_left={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":65)
+, Object(InputEventKey,"physical_keycode":4194319)
+, Object(InputEventJoypadMotion,"axis":0,"axis_value":-1.0)
+]
+}
+move_right={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":68)
+, Object(InputEventKey,"physical_keycode":4194321)
+, Object(InputEventJoypadMotion,"axis":0,"axis_value":1.0)
+]
+}
+attack={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":74)
+, Object(InputEventMouseButton,"button_index":1)
+, Object(InputEventJoypadButton,"button_index":10)
+]
+}
+dodge={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":32)
+, Object(InputEventJoypadButton,"button_index":1)
+]
+}
+debug_restart={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":82)
+, Object(InputEventJoypadButton,"button_index":6)
+]
+}
+debug_camera_blame={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":67)
+, Object(InputEventJoypadButton,"button_index":4)
+]
+}
 
 [physics]
 
