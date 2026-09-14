@@ -21,7 +21,12 @@ signal debug_event(kind: String, data: Dictionary)
 @export var windup_time := 0.22
 @export var active_time := 0.10
 @export var recovery_time := 0.35
-@export var attack_lunge := 0.6
+## Metres covered by the dash at the start of the active window. It is
+## front-loaded, so almost all of it happens in the first frames and then it
+## stops dead. That is what makes it read as sudden rather than floaty.
+@export var attack_lunge := 1.0
+## How long the dash lasts. Shorter is snappier. Capped by active_time.
+@export var lunge_time := 0.08
 @export var attack_damage := 25.0
 @export var attack_reach := 2.0
 @export var attack_arc := 55.0
@@ -33,6 +38,23 @@ signal debug_event(kind: String, data: Dictionary)
 @export var charge_damage_mult := 1.0
 @export var charge_arc_mult := 0.5
 @export var charge_stagger_mult := 0.6
+## A buffered follow-up may cut the previous swing's recovery once this much of
+## it has passed. 0 = as soon as the active frames end (juggle feel). Set it to
+## recovery_time or more to switch cancelling off and keep the buffer only.
+@export var chain_cancel_from := 0.0
+## How long a flick made mid-swing is remembered and fired as soon as it can.
+@export var buffer_window := 0.4
+
+@export_group("Knockback")
+@export var attack_knockback := 0.6  # metres, light hit
+@export var charge_knock_mult := 1.5
+## The last swing of a chain sends them flying; the light hits before it keep
+## the enemy close enough to follow up.
+@export var finisher_knock_mult := 2.5
+@export var bow_knockback := 1.0
+## How fast a shove bleeds off. The distance is the same either way; this only
+## changes whether it is a snap or a slide.
+@export var knock_friction := 12.0
 
 @export_group("Dodge")
 @export var dodge_time := 0.40
@@ -92,7 +114,7 @@ const SS_TUNABLES := [
 	"sword_drain", "bow_drain", "block_drain", "charge_time", "charged_cost",
 	"chain_cost", "chain_window", "chain_cap", "cone_deg", "bow_cost",
 	"block_hit_cost", "block_chip", "parry_cost", "parry_window", "parry_enabled",
-	"stance_break_time",
+	"stance_break_time", "buffer_window",
 ]
 
 var cs := CombatState.new()
@@ -109,14 +131,14 @@ var _dodge_dir := Vector3.FORWARD
 var strike_yaw := 0.0  # cone-clamped direction of the current swing
 var chain_hits := 0  # hits landed in the current chain
 var _swing_level := 0.0
-var _swing_used := false
+var _hit_this_swing := {}  # instance ids already hit by the swing in progress
+var _knock := Vector3.ZERO
 var _was_active := false
 var _reject_cool := 0.0
 
 @onready var attack_box: MeshInstance3D = $AttackBox
 @onready var draw_line: MeshInstance3D = $DrawLine
 @onready var fire_vector: MeshInstance3D = $FireVector
-@onready var enemy: Node = get_node_or_null("../Enemy")
 
 
 func _ready() -> void:
@@ -142,7 +164,14 @@ func _input(event: InputEvent) -> void:
 	Metrics.log_event("flick_detected", {"deg": snappedf(last_flick_deg, 1.0), "mag": snappedf(flick.length(), 1.0)})
 	match ss.stance:
 		Stance.SWORD:
-			_swing(flick)
+			if _can_swing_now():
+				_swing(flick)
+			else:
+				# Tekken-style buffer: a flick made while a swing is still coming
+				# out is kept and fires on the first frame it legally can, so
+				# rhythm replaces frame-perfect timing.
+				ss.buffer_flick(flick)
+				Metrics.log_event("flick_buffered", {"state": cs.state_name()})
 		Stance.BLOCK:
 			if ss.try_parry(cs):
 				Metrics.log_event("parry_attempted", {"stamina": snappedf(cs.stamina, 0.1)})
@@ -191,12 +220,15 @@ func _physics_process(delta: float) -> void:
 	if ev == "dodge":
 		# §7: dodge beats everything. It is the input most needed under pressure.
 		_exit_stance("dodge")
+		_knock = Vector3.ZERO
 		_dodge_dir = wish if wish != Vector3.ZERO else -global_transform.basis.z
 	if ev != "":
 		Metrics.log_event(ev, {"stamina": snappedf(cs.stamina, 0.1)})
 	# A stance cannot survive being staggered.
 	if cs.state == CombatState.STAGGER and ss.stance != Stance.NONE:
 		_exit_stance("stagger")
+	if ss.stance == Stance.SWORD and ss.has_buffer() and _can_swing_now():
+		_swing(ss.take_buffer())
 
 	_aim(delta, cam)
 	_apply_hit()
@@ -248,7 +280,10 @@ func _swing(flick: Vector2) -> void:
 		return
 	var level := ss.charge_level()
 	var cost := ss.swing_cost()
-	if not cs.try_attack(cost):
+	var from_state := cs.state
+	# A follow-up may cancel the previous swing's recovery. An opener may not.
+	var cancel_from := chain_cancel_from if ss.chain > 0 else INF
+	if not cs.try_chain_attack(cost, cancel_from):
 		Metrics.log_event("attack_refused", {"stamina": snappedf(cs.stamina, 0.1)})
 		return
 
@@ -268,9 +303,11 @@ func _swing(flick: Vector2) -> void:
 			"applied_deg": snappedf(ss.cone_deg, 1.0)}
 		)
 
+	var cancelled := from_state == CombatState.RECOVERY
 	debug_event.emit("swing", {
 		"clamped": clamped_by > 0.01, "requested_yaw": want,
 		"requested_deg": rad_to_deg(wrapf(want - rotation.y, -PI, PI)),
+		"cancelled": cancelled,
 	})
 	if ss.chain == 0:
 		chain_hits = 0
@@ -278,10 +315,33 @@ func _swing(flick: Vector2) -> void:
 	ss.on_swing()
 	Metrics.log_event(
 		"swing_fired",
-		{"charge": snappedf(level, 0.01), "chain": ss.chain, "side": ss.side, "cost": cost}
+		{"charge": snappedf(level, 0.01), "chain": ss.chain, "side": ss.side, "cost": cost, "cancelled": cancelled}
 	)
 	if ss.chain > 1:
 		Metrics.log_event("chain_extended", {"n": ss.chain})
+
+
+# Alive enemies. Queried every time rather than cached, because fight.gd spawns
+# them after this node is ready and the count changes between fights.
+func enemies() -> Array:
+	return get_tree().get_nodes_in_group("enemies").filter(func(e): return not e.cs.dead())
+
+
+func _can_swing_now() -> bool:
+	if cs.state == CombatState.IDLE:
+		return true
+	return ss.chain > 0 and cs.state == CombatState.RECOVERY and cs.t >= chain_cancel_from
+
+
+func strike_dir() -> Vector3:
+	return Vector3(-sin(strike_yaw), 0.0, -cos(strike_yaw))
+
+
+# `v` is a displacement in metres. A dodge shrugs it off.
+func apply_knock(v: Vector3) -> void:
+	v.y = 0.0
+	if cs.state != CombatState.DODGE and v.length() > 0.001:
+		_knock = v * knock_friction
 
 
 func _fire_bow() -> void:
@@ -294,22 +354,29 @@ func _fire_bow() -> void:
 	var length := bow_length(strength)
 	# ponytail: hitscan. Make it a real projectile when arrow travel time becomes
 	# a design question; at this range against a walking enemy it is not one.
-	var hit := false
-	if enemy and not enemy.cs.dead():
-		hit = CombatState.in_arc(global_position, dir, enemy.global_position, length, bow_arc)
-		if hit:
-			enemy.take_hit(bow_damage * strength, hit_stagger * strength)
-			debug_event.emit("dealt", {
-				"dmg": bow_damage * strength, "stagger": hit_stagger * strength,
-				"charge": 0.0, "chain": 0, "cap": 0, "source": "arrow",
-			})
+	# The arrow stops at the nearest enemy inside its cone.
+	var target: Node = null
+	var nearest := INF
+	for e in enemies():
+		var d := global_position.distance_to(e.global_position)
+		if d < nearest and CombatState.in_arc(global_position, dir, e.global_position, length, bow_arc):
+			nearest = d
+			target = e
+	if target:
+		var push := dir.normalized() * bow_knockback * strength
+		target.take_hit(bow_damage * strength, hit_stagger * strength, push)
+		debug_event.emit("dealt", {
+			"dmg": bow_damage * strength, "stagger": hit_stagger * strength,
+			"charge": 0.0, "chain": 0, "cap": 0, "source": "arrow",
+			"target": target, "knock": push.length(), "finisher": false,
+		})
 	debug_event.emit("shot", {
-		"from": global_position, "dir": dir, "len": length, "arc": bow_arc,
-		"hit": hit, "strength": strength,
+		"from": global_position, "dir": dir, "len": nearest if target else length,
+		"arc": bow_arc, "hit": target != null, "strength": strength,
 	})
 	Metrics.log_event(
 		"arrow_fired",
-		{"strength": snappedf(strength, 0.01), "deg": snappedf(rad_to_deg(atan2(-dir.x, -dir.z)), 1.0), "hit": hit}
+		{"strength": snappedf(strength, 0.01), "deg": snappedf(rad_to_deg(atan2(-dir.x, -dir.z)), 1.0), "hit": target != null}
 	)
 
 
@@ -377,24 +444,39 @@ func _apply_hit() -> void:
 	attack_box.visible = cs.state == CombatState.ACTIVE
 	var active_now := cs.state == CombatState.ACTIVE
 	if active_now and not _was_active:
-		_swing_used = false
+		_hit_this_swing.clear()
 	_was_active = active_now
-	if not active_now or _swing_used or enemy == null or enemy.cs.dead():
+	if not active_now:
 		return
-	# The strike direction is the cone-clamped yaw, not the body's facing.
-	var fwd := Vector3(-sin(strike_yaw), 0.0, -cos(strike_yaw))
-	if not CombatState.in_arc(global_position, fwd, enemy.global_position, attack_reach, swing_arc()):
-		return
-	_swing_used = true
-	chain_hits += 1
-	var dmg := attack_damage * (1.0 + charge_damage_mult * _swing_level)
-	var stag := hit_stagger * (1.0 + charge_stagger_mult * _swing_level)
-	enemy.take_hit(dmg, stag)
-	debug_event.emit("dealt", {
-		"dmg": dmg, "stagger": stag, "charge": _swing_level,
-		"chain": ss.chain, "cap": ss.chain_cap, "source": "sword",
-	})
-	Metrics.log_event("enemy_hit", {"enemy_hp": snappedf(enemy.cs.health, 0.1), "charge": snappedf(_swing_level, 0.01)})
+	# The strike direction is the cone-clamped yaw, not the body's facing. A swing
+	# connects with every enemy inside its arc, each at most once.
+	var finisher := ss.chain >= ss.chain_cap
+	for e in enemies():
+		var id: int = e.get_instance_id()
+		if _hit_this_swing.has(id):
+			continue
+		if not CombatState.in_arc(global_position, strike_dir(), e.global_position, attack_reach, swing_arc()):
+			continue
+		_hit_this_swing[id] = true
+		chain_hits += 1
+		var dmg := attack_damage * (1.0 + charge_damage_mult * _swing_level)
+		var stag := hit_stagger * (1.0 + charge_stagger_mult * _swing_level)
+		var knock := attack_knockback * (1.0 + charge_knock_mult * _swing_level)
+		if finisher:
+			knock *= finisher_knock_mult
+		# Pushed straight away from you, so one sweep through a crowd spreads it.
+		var push: Vector3 = e.global_position - global_position
+		push.y = 0.0
+		e.take_hit(dmg, stag, push.normalized() * knock)
+		debug_event.emit("dealt", {
+			"dmg": dmg, "stagger": stag, "charge": _swing_level,
+			"chain": ss.chain, "cap": ss.chain_cap, "source": "sword",
+			"target": e, "knock": knock, "finisher": finisher,
+		})
+		Metrics.log_event("enemy_hit", {
+			"id": e.name, "enemy_hp": snappedf(e.cs.health, 0.1),
+			"charge": snappedf(_swing_level, 0.01), "chain": ss.chain,
+		})
 
 
 func _bow_visuals(cam: Camera3D) -> void:
@@ -419,14 +501,29 @@ func _move(delta: float, wish: Vector3) -> void:
 		CombatState.DODGE:
 			target = _dodge_dir * (dodge_distance / maxf(dodge_time, 0.01))
 		CombatState.ACTIVE:
-			target = -global_transform.basis.z * (attack_lunge / maxf(active_time, 0.01))
+			# Front-loaded dash along the strike direction. Speed falls off as
+			# (1-x)^2, which covers attack_lunge metres in lunge_time and then stops
+			# dead. Sampled at the frame midpoint, or the ~5-frame sum overshoots by
+			# about a third.
+			var lt := minf(lunge_time, active_time)
+			if cs.t < lt:
+				var k := 1.0 - minf((cs.t + delta * 0.5) / maxf(lt, 0.001), 1.0)
+				target = strike_dir() * (3.0 * attack_lunge / maxf(lt, 0.001)) * k * k
 		CombatState.IDLE:
 			target = wish * move_speed * Stance.move_mult(ss.stance)
 
-	if cs.state == CombatState.DODGE or cs.state == CombatState.ACTIVE:
+	# A live shove owns horizontal velocity outright, so steering cannot walk
+	# straight back through it.
+	if _knock.length() > 0.2:
+		velocity.x = _knock.x
+		velocity.z = _knock.z
+		_knock *= exp(-knock_friction * delta)
+	elif cs.state == CombatState.DODGE or cs.state == CombatState.ACTIVE:
+		_knock = Vector3.ZERO
 		velocity.x = target.x
 		velocity.z = target.z
 	else:
+		_knock = Vector3.ZERO
 		velocity.x = move_toward(velocity.x, target.x, ground_accel * delta)
 		velocity.z = move_toward(velocity.z, target.z, ground_accel * delta)
 	velocity.y -= gravity * delta

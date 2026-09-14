@@ -37,6 +37,46 @@ a stance, **0 while the bow is drawn**. Dodge is the one input with no gesture
 involvement, deliberately (§7): the input most needed under pressure has to be
 instant and unambiguous.
 
+### Chaining — buffer and cancel
+
+Flick in rhythm, don't wait. A flick made while a swing is still coming out is
+**buffered** (the label shows `BUFFERED`) and fires on the first frame it legally
+can. A buffered follow-up may also **cancel the previous swing's recovery**, so a
+3-hit chain comes out in about 0.6s (the `CANCEL` popup shows each one).
+
+What stays committed: a swing's wind-up and active frames are never cancelled,
+and nothing cancels into a dodge. Only the dead time after a swing is given up,
+and only to the next swing in a chain.
+
+| Knob | Start | What it does |
+|---|---|---|
+| `chain_cancel_from` | 0.0 | Seconds into recovery before a follow-up may cut it. Set ≥ `recovery_time` to turn cancelling off and keep only the buffer. |
+| `buffer_window` | 0.4 | How long a mid-swing flick is remembered. |
+| `attack_lunge` / `lunge_time` | 1.0 m / 0.08 s | Front-loaded dash along the strike direction. Measured at 0.99 m. |
+
+Spec §13 listed input buffering as out of scope. It's in by request.
+
+### Knockback
+
+Your hits shove enemies straight away from you: `attack_knockback` 0.6 m for a
+light hit, scaled up by charge, ×`finisher_knock_mult` (2.5) on the last swing
+of a chain. The light hits keep an enemy close enough to follow up, and the
+finisher sends it flying. **A committed enemy isn't moved** (`armor_knock_mult`
+0). Pushing it out of range mid-swing would cancel its attack through distance,
+which is the stunlock problem again.
+
+Enemies shove you too (`knockback` 1.0 m, less when blocked, more on a guard
+break). A dodge shrugs it off. Watch for this one: **getting hit mid-chain
+pushes you out of your own reach**, so the next swings whiff until the lunge
+closes the gap.
+
+### Enemy count
+
+`−` / `+` buttons top-right, or the `-` / `=` keys, 0–8 enemies. Changing the
+count restarts the fight, because a time-to-kill measured across a mid-fight
+count change means nothing. `fight_start` and `fight_end` log `enemies`. The
+enemy is now its own scene, `enemy.tscn`, spawned by `fight.gd`.
+
 ### Debug view — `F1` (or `` ` ``) toggles
 
 Drawn by `debug_draw.gd`. It only observes the game and never takes part in it,
@@ -155,6 +195,11 @@ One honest asymmetry: the button build has no charge, so its stagger is always
 the 0.75 floor, while this build scales 0.75–1.2. Unavoidable — charge is part of
 the grammar being compared. The floor is identical.
 
+**Warning — the builds have drifted.** The lunge, knockback, chain cancel and
+enemy count exist only on this branch, not at `stage2-button`. Until they're
+backported, the A/B compares more than input grammar. Run it with 1 enemy at
+minimum.
+
 Compare time-to-kill, hits taken, and the metric that decides it: **which one you
 want to play again.**
 
@@ -189,6 +234,13 @@ Starting numbers. Record where you actually land — that record is the delivera
 | `cone_deg` | 60 | |
 | `charge_time` | 1.0 | |
 | `chain_window` | 0.45 | |
+| `chain_cancel_from` | 0.0 | |
+| `buffer_window` | 0.4 | |
+| `attack_lunge` | 1.0 | |
+| `lunge_time` | 0.08 | |
+| `attack_knockback` | 0.6 | |
+| `finisher_knock_mult` | 2.5 | |
+| **enemy** `knockback` | 1.0 | |
 
 Most likely wrong, in order: `recovery_time` (the commitment — the whole thesis,
 and the easiest to overdo), `turn_speed`, `ground_accel`, `iframe_start`.

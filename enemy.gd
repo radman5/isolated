@@ -1,5 +1,5 @@
 extends CharacterBody3D
-# Stage 2: one enemy. Test plan §4 asks for exactly three things — a readable
+# Stage 2: one enemy type. Test plan §4 asks for exactly three things: a readable
 # telegraph, a committed attack, and a punish window afterwards.
 #
 # It runs the same CombatState as the player, so "committed" means the same
@@ -8,6 +8,9 @@ extends CharacterBody3D
 #
 # Stamina is what paces its aggression. It is not a resource the enemy manages,
 # it is just a cooldown with a name we already had.
+#
+# Spawned by fight.gd from enemy.tscn, any number of them, all in the "enemies"
+# group. Nothing should look an enemy up by node name.
 
 const CombatState := preload("res://combat_state.gd")
 
@@ -32,6 +35,18 @@ const CombatState := preload("res://combat_state.gd")
 @export var attack_cost := 30.0
 @export var parry_stagger := 1.2  # §6: a successful parry staggers the enemy
 
+@export_group("Knockback")
+@export var knockback := 1.0  # metres a clean hit shoves the player
+@export var block_knock_mult := 0.4
+@export var break_knock_mult := 1.5
+## How fast a shove bleeds off. The shove covers its distance either way; this
+## only changes whether it is a snap or a slide.
+@export var knock_friction := 12.0
+## How much of the player's knockback still moves this enemy while it is
+## committed to a swing. Zero keeps the trade rule honest: shoving a committed
+## enemy out of range would cancel its attack by geometry, which is stunlock.
+@export var armor_knock_mult := 0.0
+
 @export_group("Health")
 @export var health_max := 100.0
 @export var regen_rate := 22.0  # stamina regen: how soon it can swing again
@@ -50,6 +65,7 @@ const TUNABLES := [
 var cs := CombatState.new()
 var _swing_used := false
 var _was_active := false
+var _knock := Vector3.ZERO
 
 @onready var player: Node = get_node_or_null("../Player")
 @onready var telegraph: MeshInstance3D = $Telegraph
@@ -57,23 +73,36 @@ var _was_active := false
 
 
 func _ready() -> void:
+	add_to_group("enemies")
 	cs.health_max = health_max
 	cs.health = health_max
 	cs.stamina = 100.0
 
 
-# Taking a hit interrupts whatever it was doing. Without this, attacking is free
-# for the player and trading beats playing well - measured at 3.32s of mashing
-# against 9.55s of dodge-and-punish, for 25 health that stage 2 hands straight
-# back. The stagger is what makes landing a hit worth anything.
-func take_hit(damage: float, stagger_secs: float) -> void:
+# `knock` is a displacement in metres, not a velocity. The hit interrupts
+# whatever the enemy was doing unless it is committed to a swing, and then it
+# neither flinches nor moves: see CombatState.stagger for why.
+func take_hit(damage_: float, stagger_secs: float, knock := Vector3.ZERO) -> void:
 	if cs.dead():
 		return
-	cs.take_damage(damage)
+	cs.take_damage(damage_)
 	if cs.dead():
+		apply_knock(knock)  # corpses still get shoved; it reads as the finishing blow
 		return
 	cs.stagger(stagger_secs)
-	Metrics.log_event("enemy_staggered", {"secs": snappedf(stagger_secs, 0.01)})
+	if cs.state == CombatState.STAGGER:
+		apply_knock(knock)
+		Metrics.log_event("enemy_staggered", {"id": name, "secs": snappedf(stagger_secs, 0.01)})
+	else:
+		apply_knock(knock * armor_knock_mult)
+
+
+# Decays exponentially, so a starting speed of distance * friction covers
+# `distance` metres whatever the friction is.
+func apply_knock(v: Vector3) -> void:
+	v.y = 0.0
+	if v.length() > 0.001:
+		_knock = v * knock_friction
 
 
 func _physics_process(delta: float) -> void:
@@ -83,8 +112,7 @@ func _physics_process(delta: float) -> void:
 	if cs.dead():
 		telegraph.visible = false
 		attack_box.visible = false
-		velocity = Vector3(0, velocity.y - gravity * delta, 0)
-		move_and_slide()
+		_slide(delta, Vector3.ZERO)
 		return
 
 	var to_player := Vector3.ZERO
@@ -104,7 +132,7 @@ func _physics_process(delta: float) -> void:
 
 	var ev := cs.advance(delta, want_attack, false)
 	if ev == "attack":
-		Metrics.log_event("enemy_attack", {"dist": snappedf(dist, 0.1)})
+		Metrics.log_event("enemy_attack", {"id": name, "dist": snappedf(dist, 0.1)})
 
 	telegraph.visible = cs.state == CombatState.WINDUP
 	attack_box.visible = cs.state == CombatState.ACTIVE
@@ -116,44 +144,59 @@ func _physics_process(delta: float) -> void:
 	_was_active = active_now
 	if active_now and not _swing_used and player and not player.cs.dead():
 		if CombatState.in_arc(
-			global_position,
-			-global_transform.basis.z,
-			player.global_position,
-			attack_range,
-			attack_arc
+			global_position, -global_transform.basis.z, player.global_position, attack_range, attack_arc
 		):
 			_swing_used = true
-			# Blocking must intercept before take_damage, so the player owns the
-			# damage path now. The "hit"/"dodged" event names are kept verbatim:
-			# the button build's logs and the README's jq lines depend on them,
-			# and the A/B needs both datasets speaking one language.
-			var r: String = player.receive_hit(damage)
-			var data := {"player_hp": snappedf(player.cs.health, 0.1)}
-			match r:
-				"hit":
-					Metrics.log_event("player_hit", data)
-				"dodged":
-					Metrics.log_event("dodge_success", data)
-				"blocked":
-					Metrics.log_event("hit_blocked", data)
-				"broken":
-					Metrics.log_event("stance_broken", data)
-				"parried":
-					Metrics.log_event("parry_success", data)
-					cs.stagger(parry_stagger)
+			_land_hit()
 
 	# Close the distance only while idle. A committed swing does not chase, and
-	# facing is locked once it starts — that is what makes sidestepping work and
+	# facing is locked once it starts; that is what makes sidestepping work and
 	# what turns recovery into a real punish window.
 	var target := Vector3.ZERO
 	if cs.state == CombatState.IDLE and dist < INF and dist > standoff:
 		target = to_player.normalized() * move_speed
-	velocity.x = move_toward(velocity.x, target.x, accel * delta)
-	velocity.z = move_toward(velocity.z, target.z, accel * delta)
-	velocity.y -= gravity * delta
-
 	if cs.state == CombatState.IDLE and dist < INF and dist > 0.01:
 		var want := atan2(-to_player.x, -to_player.z)
 		rotation.y = rotate_toward(rotation.y, want, turn_speed * delta)
+	_slide(delta, target)
 
+
+func _land_hit() -> void:
+	# Blocking must intercept before take_damage, so the player owns the damage
+	# path. The "hit"/"dodged" event names are kept verbatim: the button build's
+	# logs and the README's jq lines depend on them.
+	var r: String = player.receive_hit(damage)
+	var data := {"id": name, "player_hp": snappedf(player.cs.health, 0.1)}
+	var push: Vector3 = player.global_position - global_position
+	push.y = 0.0
+	push = push.normalized()
+	match r:
+		"hit":
+			Metrics.log_event("player_hit", data)
+			player.apply_knock(push * knockback)
+		"dodged":
+			Metrics.log_event("dodge_success", data)
+		"blocked":
+			Metrics.log_event("hit_blocked", data)
+			player.apply_knock(push * knockback * block_knock_mult)
+		"broken":
+			Metrics.log_event("stance_broken", data)
+			player.apply_knock(push * knockback * break_knock_mult)
+		"parried":
+			Metrics.log_event("parry_success", data)
+			cs.stagger(parry_stagger)
+
+
+# While a shove is live it owns horizontal velocity outright; blending it with
+# steering would let the AI walk straight back through its own knockback.
+func _slide(delta: float, target: Vector3) -> void:
+	if _knock.length() > 0.2:
+		velocity.x = _knock.x
+		velocity.z = _knock.z
+		_knock *= exp(-knock_friction * delta)
+	else:
+		_knock = Vector3.ZERO
+		velocity.x = move_toward(velocity.x, target.x, accel * delta)
+		velocity.z = move_toward(velocity.z, target.z, accel * delta)
+	velocity.y -= gravity * delta
 	move_and_slide()

@@ -33,13 +33,12 @@ var _im := ImmediateMesh.new()
 var _tris: Array = []  # vertex, colour, vertex, colour...
 var _lines: Array = []
 var _p: Node
-var _e: Node
 var _p_label := Label3D.new()
-var _e_label := Label3D.new()
+var _e_labels := {}  # instance id -> Label3D
 var _popups: Array = []
 var _tracers: Array = []
 var _p_ghost := {}
-var _e_ghost := {}
+var _e_ghosts := {}  # instance id -> ghost
 var _swing := {}
 
 
@@ -55,11 +54,9 @@ func _ready() -> void:
 	m.no_depth_test = true
 	mi.material_override = m
 	add_child(mi)
-	for l in [_p_label, _e_label]:
-		_style(l, 28)
-		add_child(l)
+	_style(_p_label, 28)
+	add_child(_p_label)
 	_p = get_node_or_null("../Player")
-	_e = get_node_or_null("../Enemy")
 	if _p and _p.has_signal("debug_event"):
 		_p.debug_event.connect(_on_event)
 	visible = shown
@@ -78,8 +75,8 @@ func _process(delta: float) -> void:
 	_lines.clear()
 	if _p:
 		_draw_player(delta)
-	if _e:
-		_draw_enemy(delta)
+	for e in _enemies():
+		_draw_enemy(e, delta)
 	_draw_tracers(delta)
 	_tick_popups(delta)
 	_flush()
@@ -91,7 +88,9 @@ func _draw_player(delta: float) -> void:
 	var cs = _p.cs
 	var ss = _p.ss
 	var pos: Vector3 = _p.global_position
-	var target: Vector3 = _e.global_position if _e else Vector3(INF, 0, INF)
+	var target: Array = _enemies().filter(func(e): return not e.cs.dead()).map(
+		func(e): return e.global_position
+	)
 	_cross(pos, GREY)
 	_rings(pos, cs, ss)
 
@@ -131,6 +130,8 @@ func _draw_player(delta: float) -> void:
 		flags += "  IFRAMES"
 	if ss.parry_armed():
 		flags += "  PARRY"
+	if ss.has_buffer():
+		flags += "  BUFFERED"
 	_p_label.text = "%s · %s%s\nchain %d/%d  landed %d%s\nhp %.0f  st %.0f%s" % [
 		head, cs.state_name(), _timer(cs), ss.chain, ss.chain_cap, _p.chain_hits,
 		extra, cs.health, cs.stamina, flags,
@@ -146,36 +147,43 @@ func _requested_line(pos: Vector3) -> void:
 
 # --- enemy -------------------------------------------------------------------
 
-func _draw_enemy(delta: float) -> void:
-	var cs = _e.cs
-	var pos: Vector3 = _e.global_position
-	var target: Vector3 = _p.global_position if _p else Vector3(INF, 0, INF)
-	var yaw: float = _e.rotation.y
+func _draw_enemy(e: Node, delta: float) -> void:
+	var cs = e.cs
+	var id := e.get_instance_id()
+	var pos: Vector3 = e.global_position
+	var target: Array = [_p.global_position] if _p else []
+	var yaw: float = e.rotation.y
 	_cross(pos, GREY)
 	_rings(pos, cs, null)
 	# Where it likes to stand. Just outside your reach is what makes you step in.
-	_circle(pos, _e.standoff, Color(GREY, 0.25))
+	_circle(pos, e.standoff, Color(GREY, 0.25))
 
 	match cs.state:
 		CombatState.WINDUP:
 			var k: float = cs.t / maxf(cs.windup_time, 0.001)
-			_swing_fan(pos, yaw, _e.attack_arc, _e.attack_range, YELLOW, 0.10 + 0.30 * k, target)
+			_swing_fan(pos, yaw, e.attack_arc, e.attack_range, YELLOW, 0.10 + 0.30 * k, target)
 		CombatState.ACTIVE:
-			_e_ghost = {"pos": pos, "yaw": yaw, "arc": _e.attack_arc, "reach": _e.attack_range, "age": 0.0}
-			_swing_fan(pos, yaw, _e.attack_arc, _e.attack_range, RED, 0.5, target)
+			_e_ghosts[id] = {"pos": pos, "yaw": yaw, "arc": e.attack_arc, "reach": e.attack_range, "age": 0.0}
+			_swing_fan(pos, yaw, e.attack_arc, e.attack_range, RED, 0.5, target)
 		_:
 			if not cs.dead():
-				_swing_fan(pos, yaw, _e.attack_arc, _e.attack_range, GREY, 0.0, target, 0.35)
-	if cs.state != CombatState.ACTIVE:
-		_ghost(_e_ghost, delta)
+				_swing_fan(pos, yaw, e.attack_arc, e.attack_range, GREY, 0.0, target, 0.35)
+	if cs.state != CombatState.ACTIVE and _e_ghosts.has(id):
+		_ghost(_e_ghosts[id], delta)
 
-	_e_label.position = pos + Vector3(0, 1.35, 0) + _cam_right() * 0.7
-	_e_label.modulate = _state_colour(cs.state)
+	if not _e_labels.has(id):
+		var l := Label3D.new()
+		_style(l, 26)
+		add_child(l)
+		_e_labels[id] = l
+	var label: Label3D = _e_labels[id]
+	label.position = pos + Vector3(0, 1.35, 0) + _cam_right() * 0.7
+	label.modulate = _state_colour(cs.state)
 	var punish := ""
 	if cs.state == CombatState.RECOVERY or cs.state == CombatState.STAGGER:
 		punish = "\n>> PUNISH <<"
-	_e_label.text = "ENEMY · %s%s\nhp %.0f  st %.0f%s" % [
-		"dead" if cs.dead() else cs.state_name(), _timer(cs), cs.health, cs.stamina, punish,
+	label.text = "%s · %s%s\nhp %.0f  st %.0f%s" % [
+		e.name, "dead" if cs.dead() else cs.state_name(), _timer(cs), cs.health, cs.stamina, punish,
 	]
 
 
@@ -187,23 +195,30 @@ func _on_event(kind: String, d: Dictionary) -> void:
 			_swing = d
 			if d.clamped:
 				_popup(_p.global_position, "CLAMPED  asked %+.0f°" % d.requested_deg, GREY, -1)
+			if d.cancelled:
+				_popup(_p.global_position, "CANCEL", CYAN, -1)
 		"dealt":
-			if _e == null:
+			var e = d.get("target")
+			if e == null or not is_instance_valid(e):
 				return
 			var txt := "-%.0f" % d.dmg
 			if d.source == "sword":
 				txt += "   hit %d/%d" % [d.chain, d.cap]
+				if d.finisher:
+					txt += "  FINISHER"
 				if d.charge > 0.01:
 					txt += "\ncharge %.2f" % d.charge
 			else:
 				txt += "   arrow"
 			# The trade rule, made visible: a committed target does not flinch.
-			var staggered: bool = _e.cs.state == CombatState.STAGGER
+			var staggered: bool = e.cs.state == CombatState.STAGGER
 			if staggered:
-				txt += "\nSTAGGER %.2fs" % d.stagger
+				txt += "\nSTAGGER %.2fs  knock %.1fm" % [d.stagger, d.knock]
+			elif e.cs.dead():
+				txt += "\nKILL  knock %.1fm" % d.knock
 			else:
 				txt += "\nno stagger (committed)"
-			_popup(_e.global_position, txt, RED if staggered else YELLOW, 1)
+			_popup(e.global_position, txt, RED if staggered or e.cs.dead() else YELLOW, 1)
 		"taken":
 			var lost := "-%.0f" % d.lost
 			var text: String = {
@@ -274,9 +289,11 @@ func _tick_popups(delta: float) -> void:
 
 func _swing_fan(
 	center: Vector3, yaw: float, half_deg: float, reach: float, col: Color,
-	fill_alpha: float, target: Vector3, line_alpha := 1.0
+	fill_alpha: float, targets: Array, line_alpha := 1.0
 ) -> void:
-	var connects := CombatState.in_arc(center, _dir(yaw), target, reach, half_deg)
+	var connects := targets.any(
+		func(t): return CombatState.in_arc(center, _dir(yaw), t, reach, half_deg)
+	)
 	var line := Color(GREEN if connects else col, line_alpha)
 	_fan(center, yaw, half_deg, reach, Color(col, fill_alpha), line)
 
@@ -345,6 +362,12 @@ func _style(l: Label3D, size: int) -> void:
 	l.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 	l.render_priority = 10
 	l.outline_render_priority = 9
+
+
+func _enemies() -> Array:
+	return get_tree().get_nodes_in_group("enemies").filter(
+		func(e): return not e.is_queued_for_deletion()
+	)
 
 
 func _cam_right() -> Vector3:

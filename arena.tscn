@@ -2,7 +2,6 @@
 
 [ext_resource type="Script" path="res://player.gd" id="1_player"]
 [ext_resource type="Script" path="res://debug_hud.gd" id="2_hud"]
-[ext_resource type="Script" path="res://enemy.gd" id="3_enemy"]
 [ext_resource type="Script" path="res://fight.gd" id="4_fight"]
 [ext_resource type="Script" path="res://debug_draw.gd" id="5_debug"]
 
@@ -19,16 +18,6 @@ albedo_color = Color(0.22, 0.23, 0.25, 1)
 [sub_resource type="StandardMaterial3D" id="mat_hit"]
 shading_mode = 0
 albedo_color = Color(0.95, 0.2, 0.15, 1)
-
-[sub_resource type="StandardMaterial3D" id="mat_enemy"]
-albedo_color = Color(0.42, 0.3, 0.36, 1)
-
-[sub_resource type="StandardMaterial3D" id="mat_tell"]
-shading_mode = 0
-albedo_color = Color(1, 0.75, 0.1, 1)
-
-[sub_resource type="BoxMesh" id="me_tell"]
-size = Vector3(1.7, 0.18, 1.4)
 
 [sub_resource type="BoxShape3D" id="sh_ground"]
 size = Vector3(40, 1, 40)
@@ -116,33 +105,6 @@ visible = false
 mesh = SubResource("me_swing")
 surface_material_override/0 = SubResource("mat_hit")
 
-[node name="Enemy" type="CharacterBody3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, -6)
-script = ExtResource("3_enemy")
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Enemy"]
-shape = SubResource("sh_player")
-
-[node name="Body" type="MeshInstance3D" parent="Enemy"]
-mesh = SubResource("me_player")
-surface_material_override/0 = SubResource("mat_enemy")
-
-[node name="Nose" type="MeshInstance3D" parent="Enemy"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, -0.6)
-mesh = SubResource("me_nose")
-
-[node name="Telegraph" type="MeshInstance3D" parent="Enemy"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -1.2)
-visible = false
-mesh = SubResource("me_tell")
-surface_material_override/0 = SubResource("mat_tell")
-
-[node name="AttackBox" type="MeshInstance3D" parent="Enemy"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -1.2)
-visible = false
-mesh = SubResource("me_tell")
-surface_material_override/0 = SubResource("mat_hit")
-
 [node name="DrawLine" type="MeshInstance3D" parent="Player"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, -0.5)
 visible = false
@@ -167,4 +129,3 @@ offset_right = 520.0
 offset_bottom = 420.0
 script = ExtResource("2_hud")
 player_path = NodePath("../../Player")
-enemy_path = NodePath("../../Enemy")

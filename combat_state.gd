@@ -107,12 +107,24 @@ func state_name() -> String:
 	return NAMES[state]
 
 
-# Returns one event string, "" for nothing:
-# "attack" "dodge" "attack_refused" "dodge_refused" "ignored"
 func try_attack(cost: float) -> bool:
 	return state == IDLE and _try(WINDUP, cost, "attack") == "attack"
 
 
+# A chained follow-up may start from IDLE, or cancel the previous swing's
+# RECOVERY once `cancel_from` seconds of it have passed. Never from WINDUP or
+# ACTIVE: the swing that is actually coming out stays committed, and nothing
+# cancels into a dodge. Only the dead time after a swing is given up, and only
+# to another swing. Pass INF to allow no cancel at all.
+func try_chain_attack(cost: float, cancel_from: float) -> bool:
+	if state == IDLE or (state == RECOVERY and t >= cancel_from):
+		return _try(WINDUP, cost, "attack") == "attack"
+	return false
+
+
+# Returns one event string, "" for nothing:
+# "attack" "dodge" "attack_refused" "dodge_refused" "ignored"
+#
 # `drain` is continuous stamina cost from holding a stance (§8). It defaults to
 # zero so enemy.gd's existing call is unchanged in behaviour.
 func advance(

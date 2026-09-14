@@ -32,6 +32,7 @@ var parry_cost := 15.0
 var parry_window := 0.20
 var parry_enabled := false  # §6: block must pass its gate before this flips
 var stance_break_time := 1.0
+var buffer_window := 0.4
 
 var stance := NONE
 var charge := 0.0
@@ -40,6 +41,11 @@ var side := -1  # alternates per swing; §4 wants rhythm with no combo system
 var chain_timer := 0.0
 var parry_until := -1.0
 var clock := 0.0  # own clock, so parry timing is testable without Time
+# Tekken-style input buffer: a flick made while a swing is still coming out is
+# kept, and fires on the first frame it legally can. Only the latest flick is
+# kept, and it expires after buffer_window.
+var buffered := Vector2.ZERO
+var buffer_age := 0.0
 
 
 func name_of() -> String:
@@ -51,6 +57,7 @@ func enter(s: int) -> void:
 	charge = 0.0
 	chain = 0
 	chain_timer = 0.0
+	buffered = Vector2.ZERO
 
 
 func exit() -> void:
@@ -59,6 +66,7 @@ func exit() -> void:
 	chain = 0
 	chain_timer = 0.0
 	parry_until = -1.0
+	buffered = Vector2.ZERO
 
 
 # Non-zero drain IS the predicate "a stance is held", so §8's "no regeneration
@@ -85,8 +93,27 @@ func can_chain() -> bool:
 	return chain < chain_cap and chain_timer <= chain_window
 
 
+func buffer_flick(v: Vector2) -> void:
+	buffered = v
+	buffer_age = 0.0
+
+
+func has_buffer() -> bool:
+	return buffered != Vector2.ZERO
+
+
+func take_buffer() -> Vector2:
+	var v := buffered
+	buffered = Vector2.ZERO
+	return v
+
+
 func tick(delta: float, action_state: int) -> void:
 	clock += delta
+	if buffered != Vector2.ZERO:
+		buffer_age += delta
+		if buffer_age > buffer_window:
+			buffered = Vector2.ZERO
 	if stance == SWORD and chain == 0 and action_state == CombatState.IDLE:
 		charge = minf(charge + delta, charge_time)
 	if chain > 0:

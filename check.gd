@@ -34,6 +34,8 @@ func _initialize() -> void:
 	_no_regen_while_stanced()
 	_block()
 	_parry_flag()
+	_chain_cancel()
+	_input_buffer()
 	print("OK")
 	quit()
 
@@ -520,3 +522,75 @@ func _parry_flag() -> void:
 	assert(not ss.parry_armed(), "the parry window never expired")
 	assert(ss.resolve_hit(cs, 100.0) == "blocked", "a lapsed parry still negated the hit")
 	assert(cs.stamina < cs.stamina_max - ss.parry_cost, "a failed parry was refunded anyway")
+
+
+func _advance_until(cs, state: int) -> void:
+	for i in 600:
+		if cs.state == state:
+			return
+		cs.advance(DT, false, false)
+	assert(false, "never reached state %d" % state)
+
+
+# 18. Chain cancel: a follow-up may cut the previous swing's RECOVERY, but never
+#     its WINDUP or ACTIVE, and only once cancel_from has passed.
+func _chain_cancel() -> void:
+	var cs = _fresh()
+	assert(cs.try_attack(15.0))
+	assert(not cs.try_chain_attack(10.0, 0.0), "cancelled a wind-up")
+	_advance_until(cs, CombatState.ACTIVE)
+	assert(not cs.try_chain_attack(10.0, 0.0), "cancelled an active swing")
+	_advance_until(cs, CombatState.RECOVERY)
+	var before: float = cs.stamina
+	assert(cs.try_chain_attack(10.0, 0.0), "could not cancel recovery into a follow-up")
+	assert(cs.state == CombatState.WINDUP and cs.t == 0.0, "cancel did not start a fresh wind-up")
+	assert(is_equal_approx(cs.stamina, before - 10.0), "the cancelled follow-up was not paid for")
+
+	# A later cancel point is respected.
+	cs = _fresh()
+	cs.try_attack(15.0)
+	_advance_until(cs, CombatState.RECOVERY)
+	assert(not cs.try_chain_attack(10.0, 0.2), "cancelled before cancel_from")
+	while cs.state == CombatState.RECOVERY and cs.t < 0.2:
+		cs.advance(DT, false, false)
+	assert(cs.try_chain_attack(10.0, 0.2), "could not cancel after cancel_from")
+
+	# INF means no cancel at all, but IDLE still works.
+	cs = _fresh()
+	cs.try_attack(15.0)
+	_advance_until(cs, CombatState.RECOVERY)
+	assert(not cs.try_chain_attack(10.0, INF), "INF still allowed a cancel")
+	_advance_until(cs, CombatState.IDLE)
+	assert(cs.try_chain_attack(10.0, INF), "a chain swing from IDLE was refused")
+
+	# Cannot cancel into anything with no stamina for it.
+	cs = _fresh()
+	cs.try_attack(15.0)
+	_advance_until(cs, CombatState.RECOVERY)
+	cs.stamina = 5.0
+	assert(not cs.try_chain_attack(10.0, 0.0), "cancelled without the stamina to pay")
+	assert(cs.state == CombatState.RECOVERY, "a refused cancel still left recovery")
+
+
+# 19. Input buffer: latest flick wins, it expires, and leaving the stance drops it.
+func _input_buffer() -> void:
+	var ss = Stance.new()
+	ss.enter(Stance.SWORD)
+	assert(not ss.has_buffer())
+	ss.buffer_flick(Vector2(1, 0))
+	ss.buffer_flick(Vector2(0, -1))
+	assert(ss.has_buffer(), "a buffered flick was lost")
+	assert(ss.take_buffer() == Vector2(0, -1), "the buffer did not keep the latest flick")
+	assert(not ss.has_buffer(), "take_buffer did not consume")
+
+	ss.buffer_flick(Vector2(1, 0))
+	for i in int((ss.buffer_window - 0.05) / DT):
+		ss.tick(DT, CombatState.WINDUP)
+	assert(ss.has_buffer(), "the buffer expired early")
+	for i in 10:
+		ss.tick(DT, CombatState.WINDUP)
+	assert(not ss.has_buffer(), "a stale flick outlived buffer_window")
+
+	ss.buffer_flick(Vector2(1, 0))
+	ss.exit()
+	assert(not ss.has_buffer(), "a buffered swing survived leaving the stance")

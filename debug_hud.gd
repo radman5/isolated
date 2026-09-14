@@ -4,15 +4,12 @@ const CombatState := preload("res://combat_state.gd")
 # ponytail: no theme, no panel, no colour. If you can read it, it's done.
 
 @export var player_path := NodePath("../../Player")
-@export var enemy_path := NodePath("../../Enemy")
 
 var _p: Node
-var _e: Node
 
 
 func _ready() -> void:
 	_p = get_node_or_null(player_path)
-	_e = get_node_or_null(enemy_path)
 	if _p == null:
 		text = "debug_hud: no player at %s" % player_path
 
@@ -52,16 +49,15 @@ func _process(_delta: float) -> void:
 			]
 		)
 
-	if _e != null:
-		var ec = _e.cs
-		text += (
-			"\n\nENEMY    %s  t=%.2f\nhealth   %5.1f / %.0f  %s"
-			% [
-				ec.state_name(),
-				ec.t,
-				ec.health,
-				ec.health_max,
-				"<< PUNISH" if ec.state == CombatState.RECOVERY else "",
+	var enemies := get_tree().get_nodes_in_group("enemies")
+	if not enemies.is_empty():
+		var alive := enemies.filter(func(e): return not e.cs.dead()).size()
+		text += "\n\nENEMIES  %d alive / %d" % [alive, enemies.size()]
+		for e in enemies.slice(0, 5):
+			var ec = e.cs
+			var open: bool = ec.state == CombatState.RECOVERY or ec.state == CombatState.STAGGER
+			text += "\n%-7s %-8s %.2f  hp %3.0f%s" % [
+				e.name, "dead" if ec.dead() else ec.state_name(), ec.t, ec.health,
+				"  PUNISH" if open and not ec.dead() else "",
 			]
-		)
-	text += "\n\nLMB stance/flick  RMB block  Space dodge  1/2 weapon\nC = camera-blame   R = restart   Esc = free cursor"
+	text += "\n\nLMB stance/flick  RMB block  Space dodge  1/2 weapon\nC = camera-blame   R = restart   Esc = free cursor   -/+ enemies   F1 debug"
