@@ -61,6 +61,20 @@ func _ready() -> void:
 	cs.stamina = 100.0
 
 
+# Taking a hit interrupts whatever it was doing. Without this, attacking is free
+# for the player and trading beats playing well - measured at 3.32s of mashing
+# against 9.55s of dodge-and-punish, for 25 health that stage 2 hands straight
+# back. The stagger is what makes landing a hit worth anything.
+func take_hit(damage: float, stagger_secs: float) -> void:
+	if cs.dead():
+		return
+	cs.take_damage(damage)
+	if cs.dead():
+		return
+	cs.stagger(stagger_secs)
+	Metrics.log_event("enemy_staggered", {"secs": snappedf(stagger_secs, 0.01)})
+
+
 func _physics_process(delta: float) -> void:
 	for k in TUNABLES:
 		cs.set(k, get(k))

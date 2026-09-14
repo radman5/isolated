@@ -57,10 +57,35 @@ Verified mechanically, not by eye: dodging on the telegraph took **zero damage
 across five consecutive attacks**. A late dodge still loses - the tail of the
 roll is vulnerable by design (`iframe_end` 0.28 < `dodge_time` 0.40).
 
-Known and left for you to tune: **mashing attack currently wins** (~3.3s, half
-health left). The enemy has no retreat and never backs off, and a neutral dodge
-rolls you forward into it. Those are balance knobs, not bugs - §4 says tune
-until fighting it repeatedly is fun.
+### Stagger (Stage 2b decision, in BOTH builds)
+
+A landed hit freezes the enemy for `hit_stagger` (0.75s) - **unless it is already
+committed to a swing.** That exception is the mechanic:
+
+- Hit into its telegraph and you trade. You both land. Attacking at the wrong
+  moment costs you.
+- Hit during its RECOVERY and you extend the punish window enough for a second
+  swing. Correct timing is what stagger rewards.
+
+Without the exception a hit cancels the 0.6s wind-up outright, the player swings
+faster than that, and the enemy never attacks at all - measured at 3.34s of
+mashing for **zero** damage taken, i.e. stagger made trading *better*.
+
+Measured with scripted strategies (`hit_stagger` sweep, bots not hands):
+
+| `hit_stagger` | mash | dodge-and-punish |
+|---|---|---|
+| 0.25 | 3.34s, 50 hp | 9.53s, 75 hp |
+| 0.50 | 3.33s, 50 hp | 6.0s, 75 hp |
+| **0.75** | **3.32s, 75 hp** | **4.8s, 100 hp** |
+| 1.00 | 3.31s, 75 hp | 4.78s, 100 hp |
+
+0.75 is the knee. Mashing stays ~1.5s faster but costs 25 hp; playing well takes
+none. In stage 3 that 25 hp compounds across three fights, which is the whole
+attrition hypothesis. Still to be confirmed by hands on the controls.
+
+Known and left for you to tune: the enemy has no retreat and never backs off,
+and a neutral dodge rolls you forward into it.
 
 ## Tuning log
 

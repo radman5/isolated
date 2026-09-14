@@ -37,6 +37,11 @@ const CameraRelative := preload("res://camera_relative.gd")
 @export var attack_damage := 25.0
 @export var attack_reach := 2.0
 @export var attack_arc := 55.0
+# How long a landed hit freezes the enemy. Measured, not guessed: below ~0.75s a
+# punish hit does not buy enough time for a second swing, so dodge-and-punish
+# stayed 3x slower than mashing. At 0.75 playing well takes zero damage and most
+# of the speed gap closes. Above it, nothing further changes.
+@export var hit_stagger := 0.75
 
 const TUNABLES := [
 	"windup_time",
@@ -107,7 +112,7 @@ func _physics_process(delta: float) -> void:
 			attack_arc
 		):
 			_swing_used = true
-			enemy.cs.take_damage(attack_damage)
+			enemy.take_hit(attack_damage, hit_stagger)
 			Metrics.log_event("enemy_hit", {"enemy_hp": snappedf(enemy.cs.health, 0.1)})
 
 	# WINDUP and RECOVERY fall through to ZERO, so you decelerate into the swing

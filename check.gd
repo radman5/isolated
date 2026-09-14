@@ -21,6 +21,7 @@ func _initialize() -> void:
 	_damage_and_iframes()
 	_health_never_regenerates()
 	_hit_arc()
+	_stagger()
 	print("OK")
 	quit()
 
@@ -163,3 +164,61 @@ func _hit_arc() -> void:
 	assert(CombatState.in_arc(origin, fwd, Vector3(0.5, 0, -1.0), 2.0, 55.0), "missed inside the arc")
 	# Height is ignored on purpose: everything stands on one flat plane.
 	assert(CombatState.in_arc(origin, fwd, Vector3(0, 9, -1.5), 2.0, 55.0), "height broke the arc")
+
+
+# 8. Stagger: the one external interrupt. Freezes an actor completely, and must
+#    never be shortened or stacked by a follow-up hit.
+func _stagger() -> void:
+	var cs = _fresh()
+	cs.stagger(0.3)
+	assert(cs.state == CombatState.STAGGER, "stagger did not enter the state")
+	assert(cs.busy(), "a staggered actor reported not busy")
+
+	# Frozen: input is ignored for the whole duration.
+	var frames := int(0.3 / DT) - 2
+	for i in frames:
+		assert(cs.advance(DT, true, true) == "ignored", "acted while staggered, frame %d" % i)
+		assert(cs.state == CombatState.STAGGER, "left stagger early at frame %d" % i)
+	for i in 5:
+		cs.advance(DT, false, false)
+	assert(cs.state == CombatState.IDLE, "stagger never ended: %s" % cs.state_name())
+
+	# A shorter follow-up must not cut an existing stagger short.
+	cs = _fresh()
+	cs.stagger(0.5)
+	for i in 6:
+		cs.advance(DT, false, false)
+	cs.stagger(0.1)
+	assert(cs.stagger_time > 0.4, "a shorter stagger truncated a longer one")
+
+	# A longer one does extend it.
+	cs = _fresh()
+	cs.stagger(0.2)
+	cs.stagger(0.6)
+	assert(is_equal_approx(cs.stagger_time, 0.6), "a longer stagger did not extend")
+
+	# Corpses do not flinch.
+	cs = _fresh()
+	cs.take_damage(500.0)
+	cs.stagger(0.5)
+	assert(cs.state != CombatState.STAGGER, "a dead actor was staggered")
+
+	# A committed swing is immune. This is the rule that stops stunlock: without
+	# it, hits land faster than the 0.6s telegraph and the enemy never attacks.
+	cs = _fresh()
+	assert(cs.advance(DT, true, false) == "attack")
+	cs.advance(DT, false, false)
+	assert(cs.state == CombatState.WINDUP)
+	cs.stagger(0.3)
+	assert(cs.state == CombatState.WINDUP, "stagger cancelled a wind-up: stunlock")
+	while cs.state == CombatState.WINDUP:
+		cs.advance(DT, false, false)
+	assert(cs.state == CombatState.ACTIVE)
+	cs.stagger(0.3)
+	assert(cs.state == CombatState.ACTIVE, "stagger cancelled an active swing")
+	# ...but RECOVERY is interruptible, which is what rewards a correctly timed hit.
+	while cs.state == CombatState.ACTIVE:
+		cs.advance(DT, false, false)
+	assert(cs.state == CombatState.RECOVERY)
+	cs.stagger(0.3)
+	assert(cs.state == CombatState.STAGGER, "a punish-window hit did not stagger")

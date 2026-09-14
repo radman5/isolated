@@ -8,8 +8,8 @@ extends RefCounted
 # headless --script run against a stale cache dies on an unresolved identifier.
 # Consumers preload() this instead.
 
-enum { IDLE, WINDUP, ACTIVE, RECOVERY, DODGE }
-const NAMES := ["idle", "windup", "active", "recovery", "dodge"]
+enum { IDLE, WINDUP, ACTIVE, RECOVERY, DODGE, STAGGER }
+const NAMES := ["idle", "windup", "active", "recovery", "dodge", "stagger"]
 
 # Tunables. player.gd overwrites these every frame from its @exports so
 # remote-inspector edits land live.
@@ -32,6 +32,31 @@ var t := 0.0  # seconds inside the current state
 var stamina := 100.0
 var regen_timer := 0.0
 var health := 100.0
+var stagger_time := 0.0
+
+
+# A landed hit freezes the target - but NOT while it is committed to a swing.
+#
+# That exception is the whole mechanic. Without it, a hit cancels the enemy's
+# 0.6s wind-up outright, the player swings faster than that, and the enemy never
+# completes an attack: measured at 3.34s of mashing for ZERO damage taken, which
+# made trading strictly better than playing well rather than worse.
+#
+# With it, the rule reads the same for both sides as the player's own committed
+# attack: once the swing starts, nothing outside you stops it. So hitting into a
+# telegraph trades - you both land - while hitting during RECOVERY extends the
+# punish window. Stagger becomes a reward for correct timing instead of a
+# universal interrupt.
+#
+# Never shortens an existing stagger and never stacks, so a chain cannot lock an
+# enemy out permanently.
+func stagger(secs: float) -> void:
+	if dead() or state == WINDUP or state == ACTIVE:
+		return
+	if state == STAGGER and stagger_time - t > secs:
+		return
+	stagger_time = secs
+	_enter(STAGGER)
 
 
 func busy() -> bool:
@@ -102,6 +127,9 @@ func advance(delta: float, attack_pressed: bool, dodge_pressed: bool) -> String:
 				_enter(IDLE)
 		DODGE:
 			if t >= dodge_time:
+				_enter(IDLE)
+		STAGGER:
+			if t >= stagger_time:
 				_enter(IDLE)
 
 	regen_timer = maxf(0.0, regen_timer - delta)
