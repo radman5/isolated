@@ -8,6 +8,9 @@ extends Node
 # hits taken, dodge successes, deaths by corridor position. Adding null fields
 # for them now would put numbers in the log that get trusted at verdict time.
 #
+# Stage lives on fight_start only (fight.gd), never here: two places to record
+# it is two places to disagree.
+#
 # ponytail: no aggregation, no summary, no schema. jq reads it at stage 5.
 
 var _f: FileAccess
@@ -28,7 +31,7 @@ func _ready() -> void:
 		push_warning("metrics: could not open %s - logging disabled" % path)
 	else:
 		print("metrics -> ", ProjectSettings.globalize_path(path))
-	log_event("session_start", {"stage": 1})
+	log_event("session_start")
 
 
 func log_event(ev: String, data: Dictionary = {}) -> void:

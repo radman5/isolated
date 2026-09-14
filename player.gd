@@ -32,6 +32,12 @@ const CameraRelative := preload("res://camera_relative.gd")
 @export var regen_rate := 45.0
 @export var regen_delay := 0.55
 
+@export_group("Health")
+@export var health_max := 100.0
+@export var attack_damage := 25.0
+@export var attack_reach := 2.0
+@export var attack_arc := 55.0
+
 const TUNABLES := [
 	"windup_time",
 	"active_time",
@@ -44,17 +50,23 @@ const TUNABLES := [
 	"stamina_max",
 	"regen_rate",
 	"regen_delay",
+	"health_max",
 ]
 
 var cs := CombatState.new()
 var cam_rel := CameraRelative.new()
 var _dodge_dir := Vector3.FORWARD
+var _swing_used := false
+var _was_active := false
 
 @onready var attack_box: MeshInstance3D = $AttackBox
+@onready var enemy: Node = get_node_or_null("../Enemy")
 
 
 func _ready() -> void:
 	cs.stamina = stamina_max
+	cs.health_max = health_max
+	cs.health = health_max
 
 
 func _physics_process(delta: float) -> void:
@@ -80,6 +92,23 @@ func _physics_process(delta: float) -> void:
 		Metrics.log_event(ev, {"stamina": snappedf(cs.stamina, 0.1)})
 
 	attack_box.visible = cs.state == CombatState.ACTIVE
+
+	# One hit per swing, not one per frame of the active window.
+	var active_now := cs.state == CombatState.ACTIVE
+	if active_now and not _was_active:
+		_swing_used = false
+	_was_active = active_now
+	if active_now and not _swing_used and enemy and not enemy.cs.dead():
+		if CombatState.in_arc(
+			global_position,
+			-global_transform.basis.z,
+			enemy.global_position,
+			attack_reach,
+			attack_arc
+		):
+			_swing_used = true
+			enemy.cs.take_damage(attack_damage)
+			Metrics.log_event("enemy_hit", {"enemy_hp": snappedf(enemy.cs.health, 0.1)})
 
 	# WINDUP and RECOVERY fall through to ZERO, so you decelerate into the swing
 	# and coast out of it. That slide is what reads as weight.

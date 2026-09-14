@@ -25,14 +25,49 @@ var stamina_max := 100.0
 var regen_rate := 45.0
 var regen_delay := 0.55
 
+var health_max := 100.0
+
 var state := IDLE
 var t := 0.0  # seconds inside the current state
 var stamina := 100.0
 var regen_timer := 0.0
+var health := 100.0
 
 
 func busy() -> bool:
 	return state != IDLE
+
+
+func dead() -> bool:
+	return health <= 0.0
+
+
+# Returns true if the hit landed. False means i-frames ate it, which is the only
+# payoff i-frames have and is what "dodge success" means in the §5 metrics.
+#
+# Health deliberately has no regen counterpart to the stamina one below: it does
+# not come back, ever. That is the attrition hypothesis (§2) and the whole reason
+# stage 3 exists, so the absence is load-bearing rather than an oversight.
+func take_damage(amount: float) -> bool:
+	if dead() or invulnerable():
+		return false
+	health = maxf(0.0, health - amount)
+	return true
+
+
+# Cone check: is `target` in front of `from` within `reach`? Used for both the
+# player's swing and the enemy's, so a hit means the same thing for both.
+# ponytail: no Area3D, no collision layers, no signals. Grey capsules do not
+# need physics to answer "did that connect", and this stays unit-testable.
+static func in_arc(
+	from: Vector3, forward: Vector3, target: Vector3, reach: float, half_angle_deg: float
+) -> bool:
+	var to_target := target - from
+	to_target.y = 0.0
+	var dist := to_target.length()
+	if dist > reach or dist < 0.001:
+		return false
+	return rad_to_deg(forward.normalized().angle_to(to_target / dist)) <= half_angle_deg
 
 
 func invulnerable() -> bool:

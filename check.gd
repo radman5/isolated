@@ -18,6 +18,9 @@ func _initialize() -> void:
 	_stamina_gates()
 	_iframes()
 	_regen_delay()
+	_damage_and_iframes()
+	_health_never_regenerates()
+	_hit_arc()
 	print("OK")
 	quit()
 
@@ -106,3 +109,57 @@ func _regen_delay() -> void:
 	for i in 600:
 		cs.advance(DT, false, false)
 	assert(is_equal_approx(cs.stamina, cs.stamina_max), "regen missed or overshot the cap")
+
+
+# 5. Damage lands normally, and i-frames eat it mid-dodge.
+func _damage_and_iframes() -> void:
+	var cs = _fresh()
+	assert(cs.take_damage(30.0), "a normal hit did not land")
+	assert(is_equal_approx(cs.health, 70.0), "damage did not come off health")
+
+	# Roll, then step to the middle of the i-frame window.
+	cs = _fresh()
+	assert(cs.advance(DT, false, true) == "dodge")
+	while cs.t < (cs.iframe_start + cs.iframe_end) * 0.5:
+		cs.advance(DT, false, false)
+	assert(cs.invulnerable(), "not invulnerable in the middle of the dodge")
+	var before: float = cs.health
+	assert(not cs.take_damage(30.0), "i-frames did not eat the hit")
+	assert(is_equal_approx(cs.health, before), "took damage while invulnerable")
+
+	# Tail of the dodge is vulnerable again - a late dodge must lose.
+	while cs.state == CombatState.DODGE and cs.t < cs.iframe_end:
+		cs.advance(DT, false, false)
+	assert(not cs.invulnerable(), "i-frames outlasted iframe_end")
+	assert(cs.take_damage(30.0), "the vulnerable tail of the dodge ate a hit")
+
+	# Death floors at zero rather than going negative.
+	cs = _fresh()
+	assert(cs.take_damage(500.0), "a lethal hit did not land")
+	assert(cs.health == 0.0, "health went past zero: %f" % cs.health)
+	assert(cs.dead(), "dead() false at zero health")
+	assert(not cs.take_damage(10.0), "a corpse took another hit")
+
+
+# 6. Health does not come back. This is the attrition hypothesis, so a stray
+#    regen here would quietly invalidate stage 3 rather than fail loudly.
+func _health_never_regenerates() -> void:
+	var cs = _fresh()
+	cs.take_damage(40.0)
+	for i in 1200:  # 20 seconds, far longer than any stamina regen
+		cs.advance(DT, false, false)
+	assert(is_equal_approx(cs.health, 60.0), "health regenerated to %f" % cs.health)
+	assert(is_equal_approx(cs.stamina, cs.stamina_max), "stamina did NOT regen - wrong knob")
+
+
+# 7. The hit cone: in front connects, behind and far do not.
+func _hit_arc() -> void:
+	var origin := Vector3.ZERO
+	var fwd := Vector3(0, 0, -1)
+	assert(CombatState.in_arc(origin, fwd, Vector3(0, 0, -1.5), 2.0, 55.0), "straight ahead missed")
+	assert(not CombatState.in_arc(origin, fwd, Vector3(0, 0, -3.0), 2.0, 55.0), "out of reach hit")
+	assert(not CombatState.in_arc(origin, fwd, Vector3(0, 0, 1.5), 2.0, 55.0), "hit something behind")
+	assert(not CombatState.in_arc(origin, fwd, Vector3(1.5, 0, 0), 2.0, 55.0), "hit 90 deg to the side")
+	assert(CombatState.in_arc(origin, fwd, Vector3(0.5, 0, -1.0), 2.0, 55.0), "missed inside the arc")
+	# Height is ignored on purpose: everything stands on one flat plane.
+	assert(CombatState.in_arc(origin, fwd, Vector3(0, 9, -1.5), 2.0, 55.0), "height broke the arc")
