@@ -13,6 +13,12 @@ extends Node
 #
 # ponytail: no aggregation, no summary, no schema. jq reads it at stage 5.
 
+# The A/B's load-bearing field: every log line has to be attributable to a
+# build. One word, so `git diff main..stage2b-gesture -- metrics.gd` is the
+# whole proof. Do not derive it from file existence - that is cleverness
+# someone decodes at 3am.
+const INPUT_MODE := "gesture"
+
 var _f: FileAccess
 var _t0 := 0
 
@@ -31,7 +37,7 @@ func _ready() -> void:
 		push_warning("metrics: could not open %s - logging disabled" % path)
 	else:
 		print("metrics -> ", ProjectSettings.globalize_path(path))
-	log_event("session_start")
+	log_event("session_start", {"input_mode": INPUT_MODE})
 
 
 func log_event(ev: String, data: Dictionary = {}) -> void:

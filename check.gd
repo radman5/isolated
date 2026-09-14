@@ -10,6 +10,9 @@ extends SceneTree
 # binary (a debug build). The contract is simply: no "OK", something is wrong.
 
 const CombatState := preload("res://combat_state.gd")
+const Gesture := preload("res://gesture.gd")
+const Stance := preload("res://stance_state.gd")
+const CamRel := preload("res://camera_relative.gd")
 const DT := 1.0 / 60.0
 
 
@@ -22,6 +25,15 @@ func _initialize() -> void:
 	_health_never_regenerates()
 	_hit_arc()
 	_stagger()
+	_gesture_held_gate()
+	_gesture_crossing()
+	_cone_clamp()
+	_rotation_rates()
+	_chain()
+	_bow_drag()
+	_no_regen_while_stanced()
+	_block()
+	_parry_flag()
 	print("OK")
 	quit()
 
@@ -222,3 +234,289 @@ func _stagger() -> void:
 	assert(cs.state == CombatState.RECOVERY)
 	cs.stagger(0.3)
 	assert(cs.state == CombatState.STAGGER, "a punish-window hit did not stagger")
+
+
+const FAST := Vector2(2000, 0)
+const STEP := Vector2(40, 0)
+
+
+# 9. §11-1: gestures register ONLY while a button is held. Free aiming at a
+#    moving enemy is constant fast motion; without this it swings constantly.
+func _gesture_held_gate() -> void:
+	var g = Gesture.new()
+	for i in 100:
+		g.tick(DT)
+		assert(g.sample(STEP, FAST) == Vector2.ZERO, "flicked while not held, sample %d" % i)
+	g.press()
+	g.tick(DT)
+	assert(g.sample(STEP, FAST) != Vector2.ZERO, "held, above threshold, did not flick")
+
+	# A flick already in progress must not carry into the press.
+	g = Gesture.new()
+	for i in 10:
+		g.tick(DT)
+		g.sample(STEP, FAST)
+	g.press()
+	g.tick(DT)
+	assert(g.sample(STEP, FAST) != Vector2.ZERO, "press should re-arm after fast free motion")
+
+	# Phantom motion events carry a velocity but no movement.
+	g = Gesture.new()
+	g.press()
+	assert(g.sample(Vector2.ZERO, FAST) == Vector2.ZERO, "fired on a zero-relative event")
+
+
+# 10. §11-2: fire on threshold CROSSING, not gesture completion. The index the
+#     fire happens at is literally the difference between the two.
+func _gesture_crossing() -> void:
+	var g = Gesture.new()
+	g.press()
+	var speeds := [0, 200, 600, 1100, 1400, 1900, 2400, 1900, 1100, 400, 0]
+	var fired := []
+	for i in speeds.size():
+		g.tick(DT)
+		if g.sample(STEP, Vector2(speeds[i], 0)) != Vector2.ZERO:
+			fired.append(i)
+	assert(fired.size() == 1, "expected exactly one fire, got %s" % [fired])
+	assert(fired[0] == 4, "fired at index %d; 4 is the first sample over 1200 (peak is 6)" % fired[0])
+
+	# Sustained fast motion is one flick, not sixty.
+	g = Gesture.new()
+	g.press()
+	var n := 0
+	for i in 60:
+		g.tick(DT)
+		if g.sample(STEP, FAST) != Vector2.ZERO:
+			n += 1
+	assert(n == 1, "sustained drag fired %d times, expected 1" % n)
+
+	# Flick, stop the mouse dead, flick again. A still mouse sends no events, so
+	# nothing can bring the speed back under the threshold - only the idle reset
+	# can. Without it the second flick is eaten and chaining is impossible.
+	g = Gesture.new()
+	g.press()
+	g.tick(DT)
+	assert(g.sample(STEP, FAST) != Vector2.ZERO, "first flick did not fire")
+	for i in 30:  # half a second of dead-still mouse: no sample() at all
+		g.tick(DT)
+	assert(g.sample(STEP, FAST) != Vector2.ZERO, "flick-pause-flick ate the second flick")
+
+	# Refractory: dip and re-cross too soon does nothing; after it, fires again.
+	g = Gesture.new()
+	g.press()
+	g.tick(DT); g.sample(STEP, FAST)
+	g.tick(DT); g.sample(STEP, Vector2(100, 0))
+	g.tick(DT)
+	assert(g.sample(STEP, FAST) == Vector2.ZERO, "re-fired inside the refractory window")
+	for i in 20:
+		g.tick(DT)
+		g.sample(STEP, Vector2(100, 0))
+	assert(g.sample(STEP, FAST) != Vector2.ZERO, "never re-armed after the refractory window")
+
+
+# 11. §11-3: the cone clamps and never rotates the player.
+func _cone_clamp() -> void:
+	assert(is_equal_approx(Stance.clamp_cone(0.0, deg_to_rad(120), 60.0), deg_to_rad(60)),
+		"+120 did not clamp to +60")
+	assert(is_equal_approx(Stance.clamp_cone(0.0, deg_to_rad(-120), 60.0), deg_to_rad(-60)),
+		"-120 did not clamp to -60")
+	assert(is_equal_approx(Stance.clamp_cone(0.0, deg_to_rad(30), 60.0), deg_to_rad(30)),
+		"an in-cone flick was altered")
+	# The wrap case: facing +170, flick -170. True delta is +20, well inside.
+	var got: float = Stance.clamp_cone(deg_to_rad(170), deg_to_rad(-170), 60.0)
+	assert(is_equal_approx(wrapf(got - deg_to_rad(170), -PI, PI), deg_to_rad(20)),
+		"wrap-around clamped a 20 deg flick: %f deg" % rad_to_deg(got - deg_to_rad(170))
+	)
+	# Directly behind clamps to an edge rather than failing.
+	var back: float = Stance.clamp_cone(0.0, PI, 60.0)
+	assert(absf(absf(wrapf(back, -PI, PI)) - deg_to_rad(60)) < 0.001,
+		"a flick straight backwards did not clamp to a cone edge")
+
+
+# 12. §11-4: rotation clamp differs per state, and the bow locks facing.
+func _rotation_rates() -> void:
+	assert(Stance.rot_rate(Stance.NONE, CombatState.IDLE) == 720.0)
+	assert(Stance.rot_rate(Stance.SWORD, CombatState.IDLE) == 180.0)
+	assert(Stance.rot_rate(Stance.BLOCK, CombatState.IDLE) == 180.0)
+	assert(Stance.rot_rate(Stance.BOW, CombatState.IDLE) == 0.0, "bow draw did not lock facing")
+	assert(Stance.rot_rate(Stance.NONE, CombatState.WINDUP) == 0.0, "free to turn mid-swing")
+	assert(Stance.rot_rate(Stance.NONE, CombatState.ACTIVE) == 0.0, "free to turn mid-swing")
+	assert(Stance.move_mult(Stance.NONE) == 1.0)
+	assert(Stance.move_mult(Stance.SWORD) == 0.5)
+	assert(Stance.move_mult(Stance.BLOCK) == 0.4)
+	assert(Stance.move_mult(Stance.BOW) == 0.35)
+
+
+func _run_swing(cs, ss) -> void:
+	while cs.state != CombatState.IDLE:
+		cs.advance(DT, false, false, ss.drain())
+		ss.tick(DT, cs.state)
+
+
+# 13. §11-5: chain caps at 3 and alternates side automatically.
+func _chain() -> void:
+	var cs = _fresh()
+	var ss = Stance.new()
+	ss.enter(Stance.SWORD)
+	var sides := []
+	var costs := []
+	for i in 3:
+		assert(ss.can_chain(), "could not chain at swing %d" % (i + 1))
+		var before: float = cs.stamina
+		costs.append(ss.swing_cost())
+		assert(cs.try_attack(ss.swing_cost()), "swing %d refused" % (i + 1))
+		ss.on_swing()
+		sides.append(ss.side)
+		_run_swing(cs, ss)
+		cs.stamina = before  # isolate chaining from the stamina economy here
+	assert(ss.chain == 3, "chain counted %d" % ss.chain)
+	assert(not ss.can_chain(), "chain did not cap at 3")
+	assert(sides == [1, -1, 1], "side did not alternate: %s" % [sides])
+	assert(costs[0] == ss.charged_cost, "first swing was not the charged cost")
+	assert(costs[1] == ss.chain_cost and costs[2] == ss.chain_cost, "follow-ups were not light")
+
+	# Charge applies to the first swing only (§4).
+	ss = Stance.new()
+	ss.enter(Stance.SWORD)
+	for i in 120:
+		ss.tick(DT, CombatState.IDLE)
+	assert(ss.charge_level() > 0.99, "charge did not reach max")
+	ss.on_swing()
+	for i in 20:
+		ss.tick(DT, CombatState.IDLE)
+	assert(ss.charge_level() == 0.0, "a chained swing accumulated charge")
+
+	# Letting the window lapse resets the chain.
+	ss = Stance.new()
+	ss.enter(Stance.SWORD)
+	ss.on_swing()
+	assert(ss.chain == 1)
+	for i in int((ss.chain_window + 0.1) / DT):
+		ss.tick(DT, CombatState.IDLE)
+	assert(ss.chain == 0, "chain did not reset after the window lapsed")
+
+	# Insufficient stamina ends the chain (§4).
+	cs = _fresh()
+	ss = Stance.new()
+	ss.enter(Stance.SWORD)
+	cs.stamina = ss.chain_cost - 1.0
+	assert(not cs.try_attack(ss.swing_cost()), "swung without the stamina for it")
+
+
+# 14. §11-6: bow fires opposite the drag, strength proportional to distance.
+func _bow_drag() -> void:
+	var g = Gesture.new()
+	g.press()
+	g.sample(Vector2(100, 0), Vector2(10, 0))
+	assert(g.drag == Vector2(100, 0), "drag did not accumulate")
+	assert(is_equal_approx(g.drag_strength(), 100.0 / 300.0), "strength is not proportional")
+	# Fire direction is the opposite vector - that is the whole bow.
+	assert((-g.drag).normalized() == Vector2(-1, 0), "fire direction was not opposite the drag")
+
+	g = Gesture.new()
+	g.press()
+	g.sample(Vector2(150, 0), Vector2(10, 0))
+	assert(is_equal_approx(g.drag_strength(), 0.5), "150px of 300 was not half strength")
+	g.sample(Vector2(750, 0), Vector2(10, 0))
+	assert(g.drag_strength() == 1.0, "strength exceeded 1.0 at 900px")
+
+	# A new draw starts clean.
+	g.press()
+	assert(g.drag == Vector2.ZERO and g.drag_strength() == 0.0, "drag survived a new press")
+
+
+# 15. §8/§11-10: no stamina regeneration while any stance is held.
+func _no_regen_while_stanced() -> void:
+	var cs = _fresh()
+	var prev: float = cs.stamina
+	for i in 600:
+		cs.advance(DT, false, false, 12.0)
+		assert(cs.stamina <= prev + 0.0001, "stamina rose while a stance was held")
+		prev = cs.stamina
+	assert(cs.stamina == 0.0, "600 frames of drain did not empty the bar")
+
+	# Releasing the stance lets it come back.
+	for i in 600:
+		cs.advance(DT, false, false, 0.0)
+	assert(is_equal_approx(cs.stamina, cs.stamina_max), "stamina did not recover after release")
+
+	# The enemy's call is unchanged by the new parameter.
+	cs = _fresh()
+	cs.stamina = 50.0
+	cs.advance(DT, false, false)
+	assert(cs.stamina > 50.0, "the default drain broke ordinary regeneration")
+
+
+# 16. §11-7: block absorbs at a stamina cost and breaks when the bar empties.
+func _block() -> void:
+	var cs = _fresh()
+	var ss = Stance.new()
+	ss.enter(Stance.BLOCK)
+	cs.stamina = 45.0
+
+	assert(ss.resolve_hit(cs, 100.0) == "blocked", "block did not absorb")
+	assert(is_equal_approx(cs.health, 75.0), "chip was not 25%%: health %f" % cs.health)
+	assert(is_equal_approx(cs.stamina, 25.0), "block did not cost 20 stamina")
+
+	assert(ss.resolve_hit(cs, 100.0) == "blocked", "second block did not absorb")
+	assert(is_equal_approx(cs.stamina, 5.0))
+
+	# Third hit empties the bar: stance drops and the player is staggered.
+	assert(ss.resolve_hit(cs, 100.0) == "broken", "stance did not break at zero stamina")
+	assert(ss.stance == Stance.NONE, "stance survived the break")
+	assert(cs.state == CombatState.STAGGER, "a broken stance did not stagger")
+
+	for i in int(ss.stance_break_time / DT) + 4:
+		cs.advance(DT, false, false)
+	assert(cs.state == CombatState.IDLE, "stance-break stagger never ended")
+
+	# Not blocking: full damage, no stamina cost.
+	cs = _fresh()
+	ss = Stance.new()
+	assert(ss.resolve_hit(cs, 40.0) == "hit")
+	assert(is_equal_approx(cs.health, 60.0), "an unblocked hit was reduced")
+	assert(is_equal_approx(cs.stamina, cs.stamina_max), "an unblocked hit cost stamina")
+
+	# i-frames still beat blocking outright.
+	cs = _fresh()
+	ss = Stance.new()
+	ss.enter(Stance.BLOCK)
+	cs.advance(DT, false, true)
+	while not cs.invulnerable():
+		cs.advance(DT, false, false)
+	assert(ss.resolve_hit(cs, 100.0) == "dodged", "i-frames lost to block")
+
+
+# 17. §11-8: parry sits behind one flag that can be flipped for A/B.
+func _parry_flag() -> void:
+	# Flag OFF: the refund path is unreachable and a hit still costs and chips.
+	var cs = _fresh()
+	var ss = Stance.new()
+	ss.parry_enabled = false
+	ss.enter(Stance.BLOCK)
+	assert(not ss.try_parry(cs), "parried with the flag off")
+	assert(is_equal_approx(cs.stamina, cs.stamina_max), "a disabled parry still cost stamina")
+	assert(ss.resolve_hit(cs, 100.0) == "blocked", "flag off should fall through to block")
+
+	# Flag ON: the same flick then the same hit refunds and negates.
+	cs = _fresh()
+	ss = Stance.new()
+	ss.parry_enabled = true
+	ss.enter(Stance.BLOCK)
+	assert(ss.try_parry(cs), "parry refused with the flag on")
+	assert(is_equal_approx(cs.stamina, cs.stamina_max - ss.parry_cost), "the flick did not cost")
+	assert(ss.resolve_hit(cs, 100.0) == "parried", "an armed parry did not fire")
+	assert(is_equal_approx(cs.stamina, cs.stamina_max), "a successful parry was not refunded")
+	assert(is_equal_approx(cs.health, cs.health_max), "a parried hit dealt damage")
+
+	# A flick that never gets hit stays charged - that IS the failure case.
+	cs = _fresh()
+	ss = Stance.new()
+	ss.parry_enabled = true
+	ss.enter(Stance.BLOCK)
+	ss.try_parry(cs)
+	for i in int((ss.parry_window + 0.1) / DT):
+		ss.tick(DT, CombatState.IDLE)
+	assert(not ss.parry_armed(), "the parry window never expired")
+	assert(ss.resolve_hit(cs, 100.0) == "blocked", "a lapsed parry still negated the hit")
+	assert(cs.stamina < cs.stamina_max - ss.parry_cost, "a failed parry was refunded anyway")

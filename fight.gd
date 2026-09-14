@@ -19,7 +19,7 @@ var _reset_in := 0.0
 
 func _ready() -> void:
 	_t0 = _now()
-	Metrics.log_event("fight_start", {"stage": 2})
+	Metrics.log_event("fight_start", {"stage": "2b"})
 
 
 func _process(delta: float) -> void:

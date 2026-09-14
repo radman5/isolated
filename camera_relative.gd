@@ -23,10 +23,20 @@ func to_world(input: Vector2, cam: Basis) -> Vector3:
 	if not _held:
 		_latched = cam
 		_held = true
-	var f := -_latched.z
-	var r := _latched.x
+	return project(input, _latched)
+
+
+# Screen-space vector -> world direction on the XZ plane. Shared by movement and
+# by sword flicks, so a flick "up the screen" means the same direction as
+# pressing W. Static: flick callers must NOT reuse this object's instance, whose
+# latch would engage on the first flick sample and never release.
+static func project(input: Vector2, cam: Basis) -> Vector3:
+	if input == Vector2.ZERO:
+		return Vector3.ZERO
+	var f := -cam.z
+	var r := cam.x
 	f.y = 0.0
 	r.y = 0.0
 	# Degenerate only if the camera looks straight down. Not our camera.
-	# -input.y because get_vector returns +y for "back".
+	# -input.y because screen +y is down, and get_vector returns +y for "back".
 	return (r.normalized() * input.x - f.normalized() * input.y).normalized()

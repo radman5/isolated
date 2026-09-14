@@ -109,7 +109,15 @@ func state_name() -> String:
 
 # Returns one event string, "" for nothing:
 # "attack" "dodge" "attack_refused" "dodge_refused" "ignored"
-func advance(delta: float, attack_pressed: bool, dodge_pressed: bool) -> String:
+func try_attack(cost: float) -> bool:
+	return state == IDLE and _try(WINDUP, cost, "attack") == "attack"
+
+
+# `drain` is continuous stamina cost from holding a stance (§8). It defaults to
+# zero so enemy.gd's existing call is unchanged in behaviour.
+func advance(
+	delta: float, attack_pressed: bool, dodge_pressed: bool, drain := 0.0
+) -> String:
 	t += delta
 
 	# Timed transitions run before input, so the frame recovery ends the state
@@ -132,8 +140,12 @@ func advance(delta: float, attack_pressed: bool, dodge_pressed: bool) -> String:
 			if t >= stagger_time:
 				_enter(IDLE)
 
+	# A non-zero drain IS "a stance is held", so §8's "no regeneration while any
+	# stance is held" needs no second flag that could drift out of sync.
+	if drain > 0.0:
+		stamina = maxf(0.0, stamina - drain * delta)
 	regen_timer = maxf(0.0, regen_timer - delta)
-	if regen_timer == 0.0:
+	if regen_timer == 0.0 and drain == 0.0:
 		stamina = minf(stamina_max, stamina + regen_rate * delta)
 
 	# Input is read only when IDLE. Non-cancellability is structural, not a

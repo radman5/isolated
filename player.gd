@@ -1,24 +1,34 @@
 extends CharacterBody3D
-# Stage 1 verbs: move, one committed attack, one dodge, stamina gating both.
-# The state machine lives in combat_state.gd; this file only decides *where*
-# things move. Every number here is @export and pushed live into CombatState,
-# so you can tune it from the remote inspector while playing.
+# Stage 2b: gesture input. Hold to commit, mouse motion to express, release to
+# resolve. Only the input layer differs from the button build — the swing that a
+# flick fires is the same committed WINDUP/ACTIVE/RECOVERY the enemy uses.
 
 const CombatState := preload("res://combat_state.gd")
 const CameraRelative := preload("res://camera_relative.gd")
+const Gesture := preload("res://gesture.gd")
+const Stance := preload("res://stance_state.gd")
 
 @export_group("Move")
 @export var move_speed := 5.0
 @export var ground_accel := 45.0
-@export var turn_speed := 12.0
 @export var gravity := 24.0
 
 @export_group("Attack")
 @export var windup_time := 0.22
 @export var active_time := 0.10
 @export var recovery_time := 0.35
-@export var attack_cost := 25.0
-@export var attack_lunge := 0.6  # metres travelled during the active window
+@export var attack_lunge := 0.6
+@export var attack_damage := 25.0
+@export var attack_reach := 2.0
+@export var attack_arc := 55.0
+@export var hit_stagger := 0.75
+# Chained follow-ups are faster, which is how §4's "fast light follow-ups" is
+# delivered without letting a flick cancel a swing in progress.
+@export var chain_windup_time := 0.12
+@export var chain_recovery_time := 0.20
+@export var charge_damage_mult := 1.0
+@export var charge_arc_mult := 0.5
+@export var charge_stagger_mult := 0.6
 
 @export_group("Dodge")
 @export var dodge_time := 0.40
@@ -34,37 +44,73 @@ const CameraRelative := preload("res://camera_relative.gd")
 
 @export_group("Health")
 @export var health_max := 100.0
-@export var attack_damage := 25.0
-@export var attack_reach := 2.0
-@export var attack_arc := 55.0
-# How long a landed hit freezes the enemy. Measured, not guessed: below ~0.75s a
-# punish hit does not buy enough time for a second swing, so dodge-and-punish
-# stayed 3x slower than mashing. At 0.75 playing well takes zero damage and most
-# of the speed gap closes. Above it, nothing further changes.
-@export var hit_stagger := 0.75
 
-const TUNABLES := [
-	"windup_time",
-	"active_time",
-	"recovery_time",
-	"attack_cost",
-	"dodge_time",
-	"iframe_start",
-	"iframe_end",
-	"dodge_cost",
-	"stamina_max",
-	"regen_rate",
-	"regen_delay",
-	"health_max",
+@export_group("Gesture")
+## Needs calibration. Flick five times and read `peak` on the debug overlay.
+@export_range(200.0, 6000.0, 10.0, "or_greater", "suffix:px/s") var flick_threshold := 1200.0
+@export var flick_refractory := 0.12
+## Set false if fast flicks feel dropped: input is accumulated to one motion
+## event per rendered frame by default.
+@export var raw_mouse_input := false
+
+@export_group("Sword stance")
+@export var sword_drain := 12.0
+@export var charge_time := 1.0
+@export var charged_cost := 15.0
+@export var chain_cost := 10.0
+@export var chain_window := 0.45
+@export var chain_cap := 3
+@export var cone_deg := 60.0
+
+@export_group("Bow")
+@export var bow_drain := 8.0
+@export var bow_cost := 10.0
+@export var bow_damage := 30.0
+@export var bow_range := 14.0
+@export var bow_arc := 8.0
+@export var drag_max_px := 300.0
+
+@export_group("Block")
+@export var block_drain := 5.0
+@export var block_hit_cost := 20.0
+@export var block_chip := 0.25
+@export var stance_break_time := 1.0
+## §6: block must pass its own gate before this is worth turning on.
+@export var parry_enabled := false
+@export var parry_cost := 15.0
+@export var parry_window := 0.20
+
+const CS_TUNABLES := [
+	"windup_time", "active_time", "recovery_time", "dodge_time", "iframe_start",
+	"iframe_end", "dodge_cost", "stamina_max", "regen_rate", "regen_delay", "health_max",
+]
+const SS_TUNABLES := [
+	"sword_drain", "bow_drain", "block_drain", "charge_time", "charged_cost",
+	"chain_cost", "chain_window", "chain_cap", "cone_deg", "bow_cost",
+	"block_hit_cost", "block_chip", "parry_cost", "parry_window", "parry_enabled",
+	"stance_break_time",
 ]
 
 var cs := CombatState.new()
 var cam_rel := CameraRelative.new()
+var g := Gesture.new()
+var ss := Stance.new()
+
+var weapon := Stance.SWORD  # which weapon LMB draws
+var cone_flash := 0.0  # latched so a one-frame clamp is actually visible
+var last_flick_deg := 0.0
+var draw_strength := 0.0
+
 var _dodge_dir := Vector3.FORWARD
+var _strike_yaw := 0.0
+var _swing_level := 0.0
 var _swing_used := false
 var _was_active := false
+var _reject_cool := 0.0
 
 @onready var attack_box: MeshInstance3D = $AttackBox
+@onready var draw_line: MeshInstance3D = $DrawLine
+@onready var fire_vector: MeshInstance3D = $FireVector
 @onready var enemy: Node = get_node_or_null("../Enemy")
 
 
@@ -72,13 +118,61 @@ func _ready() -> void:
 	cs.stamina = stamina_max
 	cs.health_max = health_max
 	cs.health = health_max
+	Input.mouse_mode = Input.MOUSE_MODE_CONFINED
+	# Without an escape you cannot get the cursor back to quit.
+	if raw_mouse_input:
+		Input.use_accumulated_input = false
+
+
+# Flicks are handled here rather than in _physics_process so the swing starts on
+# the frame the threshold is crossed. CombatState is pure, so firing it outside
+# the physics step just sets state/t and the next step advances it.
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventMouseMotion):
+		return
+	var flick := g.sample(event.relative, event.screen_velocity)
+	if flick == Vector2.ZERO:
+		return
+	last_flick_deg = rad_to_deg(atan2(flick.x, -flick.y))
+	Metrics.log_event("flick_detected", {"deg": snappedf(last_flick_deg, 1.0), "mag": snappedf(flick.length(), 1.0)})
+	match ss.stance:
+		Stance.SWORD:
+			_swing(flick)
+		Stance.BLOCK:
+			if ss.try_parry(cs):
+				Metrics.log_event("parry_attempted", {"stamina": snappedf(cs.stamina, 0.1)})
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel"):
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	# Debug weapon selector, NOT a swap mechanic: gated to a neutral stance, so
+	# no mid-chain swap, which is what §13 and the §4 v2 hook actually forbid.
+	elif event.is_action_pressed("weapon_sword") and ss.stance == Stance.NONE:
+		weapon = Stance.SWORD
+	elif event.is_action_pressed("weapon_bow") and ss.stance == Stance.NONE:
+		weapon = Stance.BOW
 
 
 func _physics_process(delta: float) -> void:
-	# Re-push tunables every frame so remote-inspector edits land live while
-	# you're playing. This is the single most useful thing in the file.
-	for k in TUNABLES:
+	for k in CS_TUNABLES:
 		cs.set(k, get(k))
+	for k in SS_TUNABLES:
+		ss.set(k, get(k))
+	g.flick_threshold = flick_threshold
+	g.refractory = flick_refractory
+	g.drag_max_px = drag_max_px
+	# Swings after the first in a chain are quicker.
+	if ss.chain > 1:
+		cs.windup_time = chain_windup_time
+		cs.recovery_time = chain_recovery_time
+
+	g.tick(delta)
+	cone_flash = maxf(0.0, cone_flash - delta)
+	_reject_cool = maxf(0.0, _reject_cool - delta)
+	_stance_edges()
+	ss.tick(delta, cs.state)
+	draw_strength = g.drag_strength() if ss.stance == Stance.BOW else 0.0
 
 	var cam := get_viewport().get_camera_3d()
 	var wish := Vector3.ZERO
@@ -88,35 +182,194 @@ func _physics_process(delta: float) -> void:
 			cam.global_transform.basis
 		)
 
-	var ev := cs.advance(
-		delta, Input.is_action_just_pressed("attack"), Input.is_action_just_pressed("dodge")
-	)
+	var ev := cs.advance(delta, false, Input.is_action_just_pressed("dodge"), ss.drain())
 	if ev == "dodge":
+		# §7: dodge beats everything. It is the input most needed under pressure.
+		_exit_stance("dodge")
 		_dodge_dir = wish if wish != Vector3.ZERO else -global_transform.basis.z
 	if ev != "":
 		Metrics.log_event(ev, {"stamina": snappedf(cs.stamina, 0.1)})
+	# A stance cannot survive being staggered.
+	if cs.state == CombatState.STAGGER and ss.stance != Stance.NONE:
+		_exit_stance("stagger")
 
+	_aim(delta, cam)
+	_apply_hit()
+	_bow_visuals(cam)
+	_move(delta, wish)
+
+
+func _stance_edges() -> void:
+	if Input.is_action_just_pressed("attack"):
+		_enter_stance(weapon)
+	elif Input.is_action_just_released("attack"):
+		if ss.stance == Stance.BOW:
+			_fire_bow()
+		_exit_stance("release")
+	if Input.is_action_just_pressed("block") and weapon != Stance.BOW:
+		# §5 open question, defaulting to no: ranged safety costs you defence.
+		_enter_stance(Stance.BLOCK)
+	elif Input.is_action_just_released("block") and ss.stance == Stance.BLOCK:
+		_exit_stance("release")
+
+
+func _enter_stance(s: int) -> void:
+	if ss.stance != Stance.NONE or cs.state != CombatState.IDLE:
+		return
+	ss.enter(s)
+	g.press()
+	Metrics.log_event("stance_entered", {"stance": ss.name_of()})
+	if s == Stance.BLOCK:
+		Metrics.log_event("block_entered", {})
+	elif s == Stance.BOW:
+		Metrics.log_event("draw_started", {})
+
+
+func _exit_stance(why: String) -> void:
+	if ss.stance == Stance.NONE:
+		return
+	Metrics.log_event(
+		"stance_exited",
+		{"stance": ss.name_of(), "why": why, "chain": ss.chain, "rejected": g.rejected}
+	)
+	ss.exit()
+	g.release()
+	cs.regen_timer = cs.regen_delay
+
+
+func _swing(flick: Vector2) -> void:
+	if not ss.can_chain():
+		Metrics.log_event("chain_capped", {"n": ss.chain})
+		return
+	var level := ss.charge_level()
+	var cost := ss.swing_cost()
+	if not cs.try_attack(cost):
+		Metrics.log_event("attack_refused", {"stamina": snappedf(cs.stamina, 0.1)})
+		return
+
+	var cam := get_viewport().get_camera_3d()
+	var want := rotation.y
+	if cam:
+		var world := CameraRelative.project(flick, cam.global_transform.basis)
+		if world != Vector3.ZERO:
+			want = atan2(-world.x, -world.z)
+	_strike_yaw = Stance.clamp_cone(rotation.y, want, ss.cone_deg)
+	var clamped_by := absf(wrapf(want - _strike_yaw, -PI, PI))
+	if clamped_by > 0.01:
+		cone_flash = 0.5
+		Metrics.log_event(
+			"cone_clamped",
+			{"requested_deg": snappedf(rad_to_deg(wrapf(want - rotation.y, -PI, PI)), 1.0),
+			"applied_deg": snappedf(ss.cone_deg, 1.0)}
+		)
+
+	_swing_level = level
+	ss.on_swing()
+	Metrics.log_event(
+		"swing_fired",
+		{"charge": snappedf(level, 0.01), "chain": ss.chain, "side": ss.side, "cost": cost}
+	)
+	if ss.chain > 1:
+		Metrics.log_event("chain_extended", {"n": ss.chain})
+
+
+func _fire_bow() -> void:
+	var strength := g.drag_strength()
+	if cs.stamina < ss.bow_cost:
+		Metrics.log_event("attack_refused", {"stamina": snappedf(cs.stamina, 0.1)})
+		return
+	cs.stamina -= ss.bow_cost
+	var cam := get_viewport().get_camera_3d()
+	var dir := -global_transform.basis.z
+	if cam:
+		var world := CameraRelative.project(-g.drag, cam.global_transform.basis)
+		if world != Vector3.ZERO:
+			dir = world
+	# ponytail: hitscan. Make it a real projectile when arrow travel time becomes
+	# a design question; at this range against a walking enemy it is not one.
+	var hit := false
+	if enemy and not enemy.cs.dead():
+		hit = CombatState.in_arc(
+			global_position, dir, enemy.global_position, bow_range * maxf(strength, 0.05), bow_arc
+		)
+		if hit:
+			enemy.take_hit(bow_damage * strength, hit_stagger * strength)
+	Metrics.log_event(
+		"arrow_fired",
+		{"strength": snappedf(strength, 0.01), "deg": snappedf(rad_to_deg(atan2(-dir.x, -dir.z)), 1.0), "hit": hit}
+	)
+
+
+# The damage path for everything that hits the player. Block has to intercept
+# before take_damage, so enemy.gd calls this rather than cs.take_damage directly.
+func receive_hit(amount: float) -> String:
+	var was_blocking := ss.stance == Stance.BLOCK
+	var r := ss.resolve_hit(cs, amount)
+	if r == "broken" and was_blocking:
+		g.release()
+		Metrics.log_event("stance_exited", {"stance": "block", "why": "broken", "chain": 0, "rejected": g.rejected})
+	return r
+
+
+func _aim(delta: float, cam: Camera3D) -> void:
+	var rate := Stance.rot_rate(ss.stance, cs.state)
+	if rate <= 0.0 or cam == null:
+		return
+	var m := get_viewport().get_mouse_position()
+	# Plane.intersects_ray returns Vector3 OR null - both the untyped var and
+	# the null check are load-bearing.
+	var hit = Plane(Vector3.UP, global_position.y).intersects_ray(
+		cam.project_ray_origin(m), cam.project_ray_normal(m)
+	)
+	if hit == null:
+		return
+	var to_aim: Vector3 = hit - global_position
+	to_aim.y = 0.0
+	if to_aim.length() < 0.05:
+		return
+	rotation.y = rotate_toward(
+		rotation.y, atan2(-to_aim.x, -to_aim.z), deg_to_rad(rate) * delta
+	)
+
+
+func _apply_hit() -> void:
 	attack_box.visible = cs.state == CombatState.ACTIVE
-
-	# One hit per swing, not one per frame of the active window.
 	var active_now := cs.state == CombatState.ACTIVE
 	if active_now and not _was_active:
 		_swing_used = false
 	_was_active = active_now
-	if active_now and not _swing_used and enemy and not enemy.cs.dead():
-		if CombatState.in_arc(
-			global_position,
-			-global_transform.basis.z,
-			enemy.global_position,
-			attack_reach,
-			attack_arc
-		):
-			_swing_used = true
-			enemy.take_hit(attack_damage, hit_stagger)
-			Metrics.log_event("enemy_hit", {"enemy_hp": snappedf(enemy.cs.health, 0.1)})
+	if not active_now or _swing_used or enemy == null or enemy.cs.dead():
+		return
+	# The strike direction is the cone-clamped yaw, not the body's facing.
+	var fwd := Vector3(-sin(_strike_yaw), 0.0, -cos(_strike_yaw))
+	var arc := attack_arc * (1.0 + charge_arc_mult * _swing_level)
+	if not CombatState.in_arc(global_position, fwd, enemy.global_position, attack_reach, arc):
+		return
+	_swing_used = true
+	enemy.take_hit(
+		attack_damage * (1.0 + charge_damage_mult * _swing_level),
+		hit_stagger * (1.0 + charge_stagger_mult * _swing_level)
+	)
+	Metrics.log_event("enemy_hit", {"enemy_hp": snappedf(enemy.cs.health, 0.1), "charge": snappedf(_swing_level, 0.01)})
 
-	# WINDUP and RECOVERY fall through to ZERO, so you decelerate into the swing
-	# and coast out of it. That slide is what reads as weight.
+
+func _bow_visuals(cam: Camera3D) -> void:
+	var drawing := ss.stance == Stance.BOW
+	draw_line.visible = drawing
+	fire_vector.visible = drawing
+	if not drawing or cam == null:
+		return
+	var world := CameraRelative.project(g.drag, cam.global_transform.basis)
+	if world == Vector3.ZERO:
+		return
+	# §5: this readout is the whole reason the mechanic works.
+	draw_line.rotation.y = atan2(-world.x, -world.z) - rotation.y
+	draw_line.scale.z = maxf(g.drag.length() * 0.02, 0.1)
+	fire_vector.rotation.y = draw_line.rotation.y + PI
+	fire_vector.scale.z = maxf(g.drag_strength() * 4.0, 0.1)
+
+
+func _move(delta: float, wish: Vector3) -> void:
 	var target := Vector3.ZERO
 	match cs.state:
 		CombatState.DODGE:
@@ -124,17 +377,13 @@ func _physics_process(delta: float) -> void:
 		CombatState.ACTIVE:
 			target = -global_transform.basis.z * (attack_lunge / maxf(active_time, 0.01))
 		CombatState.IDLE:
-			target = wish * move_speed
+			target = wish * move_speed * Stance.move_mult(ss.stance)
 
 	if cs.state == CombatState.DODGE or cs.state == CombatState.ACTIVE:
-		velocity.x = target.x  # burst, no ramp
+		velocity.x = target.x
 		velocity.z = target.z
 	else:
 		velocity.x = move_toward(velocity.x, target.x, ground_accel * delta)
 		velocity.z = move_toward(velocity.z, target.z, ground_accel * delta)
 	velocity.y -= gravity * delta
-
-	if cs.state == CombatState.IDLE and wish != Vector3.ZERO:
-		rotation.y = rotate_toward(rotation.y, atan2(-wish.x, -wish.z), turn_speed * delta)
-
 	move_and_slide()

@@ -52,6 +52,13 @@ size = Vector3(0.2, 0.2, 0.4)
 [sub_resource type="BoxMesh" id="me_swing"]
 size = Vector3(1.6, 0.2, 1.2)
 
+[sub_resource type="StandardMaterial3D" id="mat_draw"]
+shading_mode = 0
+albedo_color = Color(0.35, 0.8, 1, 1)
+
+[sub_resource type="BoxMesh" id="me_line"]
+size = Vector3(0.08, 0.08, 1)
+
 [node name="Arena" type="Node3D"]
 script = ExtResource("4_fight")
 
@@ -135,13 +142,25 @@ visible = false
 mesh = SubResource("me_tell")
 surface_material_override/0 = SubResource("mat_hit")
 
+[node name="DrawLine" type="MeshInstance3D" parent="Player"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, -0.5)
+visible = false
+mesh = SubResource("me_line")
+surface_material_override/0 = SubResource("mat_draw")
+
+[node name="FireVector" type="MeshInstance3D" parent="Player"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, -0.5)
+visible = false
+mesh = SubResource("me_line")
+surface_material_override/0 = SubResource("mat_hit")
+
 [node name="HUD" type="CanvasLayer" parent="."]
 
 [node name="Label" type="Label" parent="HUD"]
 offset_left = 12.0
 offset_top = 8.0
 offset_right = 520.0
-offset_bottom = 200.0
+offset_bottom = 420.0
 script = ExtResource("2_hud")
 player_path = NodePath("../../Player")
 enemy_path = NodePath("../../Enemy")

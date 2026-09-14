@@ -1,5 +1,8 @@
 # isolated — ISOLA combat prototype
 
+> **Branch `stage2b-gesture`.** The button build is frozen at tag `stage2-button`.
+> Both share the stagger implementation; `git merge-base` proves it.
+
 Stages 1-2 of `../isola/ISOLA_Combat_Test_Plan.md`. **Disposable.** Per §8 what
 carries forward is the tuning knowledge and the numbers, not this code.
 
@@ -23,10 +26,33 @@ $GODOT --editor --path .                             # then F5
 cancelled, stamina gates both verbs, i-frames open and close on the right frames,
 stamina regen waits then stops at the cap. It needs no scene and no window.
 
-## Controls
+## Controls (gesture build)
 
-`WASD`/arrows or left stick · `J`/LMB/RB attack · `Space`/B dodge ·
-`R`/Start restart · `C`/Back flag a camera-contributed hit
+`WASD` move · **hold LMB** draw weapon · **flick the mouse** to strike ·
+**hold RMB** block · `Space` dodge · `1`/`2` sword/bow · `Esc` free the cursor ·
+`R` restart · `C` flag a camera-contributed hit
+
+Facing follows the mouse. Rotation is clamped by stance — 720°/s free, 180°/s in
+a stance, **0 while the bow is drawn**. Dodge is the one input with no gesture
+involvement, deliberately (§7): the input most needed under pressure has to be
+instant and unambiguous.
+
+### Calibrate the flick threshold first
+
+`1200 px/s` is a guess, and whether macOS reports retina motion in physical or
+logical pixels is not documented. Flick five times and read **`peak`** on the
+overlay, then set `flick_threshold` from it and record it below.
+
+## Files (gesture build)
+
+| | |
+|---|---|
+| `gesture.gd` | Flick detection + bow drag. Pure. No ring buffer — `InputEventMouseMotion.screen_velocity` is already px/s. |
+| `stance_state.gd` | The second state axis: stance, charge, chain, block/parry. Player only. |
+
+Two axes, not one enum: `combat_state.gd` says what your body is committed to,
+`stance_state.gd` says what your weapon hand is doing. A flick fires the *existing*
+committed WINDUP/ACTIVE/RECOVERY, so a swing means the same thing for both sides.
 
 ## Files
 
@@ -87,6 +113,27 @@ attrition hypothesis. Still to be confirmed by hands on the controls.
 Known and left for you to tune: the enemy has no retreat and never backs off,
 and a neutral dodge rolls you forward into it.
 
+## A/B protocol (§12 — the actual deliverable)
+
+```bash
+git switch --detach stage2-button   # relaunch editor, 5 fights, QUIT
+git switch stage2b-gesture          # relaunch editor, 5 fights, QUIT
+```
+
+**One launch per build, quit between.** Each launch writes one `run_*.jsonl` with
+one `session_start` carrying `input_mode`, so each file is self-labelling.
+
+**Use sword + dodge only during the runs.** Bow and block exist here but not in
+the button build; using them makes the comparison measure option count rather
+than input grammar, which is the one thing it is for.
+
+One honest asymmetry: the button build has no charge, so its stagger is always
+the 0.75 floor, while this build scales 0.75–1.2. Unavoidable — charge is part of
+the grammar being compared. The floor is identical.
+
+Compare time-to-kill, hits taken, and the metric that decides it: **which one you
+want to play again.**
+
 ## Tuning log
 
 Starting numbers. Record where you actually land — that record is the deliverable.
@@ -113,6 +160,11 @@ Starting numbers. Record where you actually land — that record is the delivera
 | **enemy** `standoff` | 2.15 | |
 | **enemy** `damage` | 25.0 | |
 | **enemy** `move_speed` | 3.0 | |
+| `hit_stagger` | 0.75 | |
+| `flick_threshold` | 1200 px/s | **calibrate me** |
+| `cone_deg` | 60 | |
+| `charge_time` | 1.0 | |
+| `chain_window` | 0.45 | |
 
 Most likely wrong, in order: `recovery_time` (the commitment — the whole thesis,
 and the easiest to overdo), `turn_speed`, `ground_accel`, `iframe_start`.

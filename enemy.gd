@@ -30,6 +30,7 @@ const CombatState := preload("res://combat_state.gd")
 @export var attack_arc := 55.0
 @export var damage := 25.0
 @export var attack_cost := 30.0
+@export var parry_stagger := 1.2  # §6: a successful parry staggers the enemy
 
 @export_group("Health")
 @export var health_max := 100.0
@@ -122,11 +123,24 @@ func _physics_process(delta: float) -> void:
 			attack_arc
 		):
 			_swing_used = true
-			var landed: bool = player.cs.take_damage(damage)
-			Metrics.log_event(
-				"player_hit" if landed else "dodge_success",
-				{"player_hp": snappedf(player.cs.health, 0.1)}
-			)
+			# Blocking must intercept before take_damage, so the player owns the
+			# damage path now. The "hit"/"dodged" event names are kept verbatim:
+			# the button build's logs and the README's jq lines depend on them,
+			# and the A/B needs both datasets speaking one language.
+			var r: String = player.receive_hit(damage)
+			var data := {"player_hp": snappedf(player.cs.health, 0.1)}
+			match r:
+				"hit":
+					Metrics.log_event("player_hit", data)
+				"dodged":
+					Metrics.log_event("dodge_success", data)
+				"blocked":
+					Metrics.log_event("hit_blocked", data)
+				"broken":
+					Metrics.log_event("stance_broken", data)
+				"parried":
+					Metrics.log_event("parry_success", data)
+					cs.stagger(parry_stagger)
 
 	# Close the distance only while idle. A committed swing does not chase, and
 	# facing is locked once it starts — that is what makes sidestepping work and

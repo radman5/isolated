@@ -35,6 +35,23 @@ func _process(_delta: float) -> void:
 			Vector2(v.x, v.z).length(),
 		]
 	)
+	# Gesture build only; the button build has no `ss` and its HUD is unchanged.
+	if _p.get("ss") != null:
+		var ss = _p.ss
+		var g = _p.g
+		text += (
+			"\n\nstance   %-6s charge %.2f  chain %d/%d  side %s\nflick    %+4.0f deg  %5.0f px/s   near-miss %d\npeak     %5.0f px/s  (set flick_threshold from this)\ncone     %s      draw %.2f   parry %s"
+			% [
+				ss.name_of(), ss.charge_level(), ss.chain, ss.chain_cap,
+				"L" if ss.side < 0 else "R",
+				_p.last_flick_deg, g.vel.length(), g.rejected,
+				g.peak,
+				"CLAMPED" if _p.cone_flash > 0.0 else "-",
+				_p.draw_strength,
+				"ARMED" if ss.parry_armed() else ("-" if ss.parry_enabled else "off"),
+			]
+		)
+
 	if _e != null:
 		var ec = _e.cs
 		text += (
@@ -47,4 +64,4 @@ func _process(_delta: float) -> void:
 				"<< PUNISH" if ec.state == CombatState.RECOVERY else "",
 			]
 		)
-	text += "\n\nC = camera-blame    R = restart"
+	text += "\n\nLMB stance/flick  RMB block  Space dodge  1/2 weapon\nC = camera-blame   R = restart   Esc = free cursor"

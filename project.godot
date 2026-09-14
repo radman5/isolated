@@ -67,6 +67,21 @@ dodge={
 , Object(InputEventJoypadButton,"button_index":1)
 ]
 }
+block={
+"deadzone": 0.5,
+"events": [Object(InputEventMouseButton,"button_index":2)
+]
+}
+weapon_sword={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":49)
+]
+}
+weapon_bow={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":50)
+]
+}
 debug_restart={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"physical_keycode":82)
