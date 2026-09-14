@@ -8,6 +8,10 @@ const CameraRelative := preload("res://camera_relative.gd")
 const Gesture := preload("res://gesture.gd")
 const Stance := preload("res://stance_state.gd")
 
+# For debug_draw.gd only. Gameplay never listens to this; kinds are
+# "swing", "dealt", "taken", "shot".
+signal debug_event(kind: String, data: Dictionary)
+
 @export_group("Move")
 @export var move_speed := 5.0
 @export var ground_accel := 45.0
@@ -102,7 +106,8 @@ var last_flick_deg := 0.0
 var draw_strength := 0.0
 
 var _dodge_dir := Vector3.FORWARD
-var _strike_yaw := 0.0
+var strike_yaw := 0.0  # cone-clamped direction of the current swing
+var chain_hits := 0  # hits landed in the current chain
 var _swing_level := 0.0
 var _swing_used := false
 var _was_active := false
@@ -253,8 +258,8 @@ func _swing(flick: Vector2) -> void:
 		var world := CameraRelative.project(flick, cam.global_transform.basis)
 		if world != Vector3.ZERO:
 			want = atan2(-world.x, -world.z)
-	_strike_yaw = Stance.clamp_cone(rotation.y, want, ss.cone_deg)
-	var clamped_by := absf(wrapf(want - _strike_yaw, -PI, PI))
+	strike_yaw = Stance.clamp_cone(rotation.y, want, ss.cone_deg)
+	var clamped_by := absf(wrapf(want - strike_yaw, -PI, PI))
 	if clamped_by > 0.01:
 		cone_flash = 0.5
 		Metrics.log_event(
@@ -263,6 +268,12 @@ func _swing(flick: Vector2) -> void:
 			"applied_deg": snappedf(ss.cone_deg, 1.0)}
 		)
 
+	debug_event.emit("swing", {
+		"clamped": clamped_by > 0.01, "requested_yaw": want,
+		"requested_deg": rad_to_deg(wrapf(want - rotation.y, -PI, PI)),
+	})
+	if ss.chain == 0:
+		chain_hits = 0
 	_swing_level = level
 	ss.on_swing()
 	Metrics.log_event(
@@ -279,32 +290,62 @@ func _fire_bow() -> void:
 		Metrics.log_event("attack_refused", {"stamina": snappedf(cs.stamina, 0.1)})
 		return
 	cs.stamina -= ss.bow_cost
-	var cam := get_viewport().get_camera_3d()
-	var dir := -global_transform.basis.z
-	if cam:
-		var world := CameraRelative.project(-g.drag, cam.global_transform.basis)
-		if world != Vector3.ZERO:
-			dir = world
+	var dir := bow_aim()
+	var length := bow_length(strength)
 	# ponytail: hitscan. Make it a real projectile when arrow travel time becomes
 	# a design question; at this range against a walking enemy it is not one.
 	var hit := false
 	if enemy and not enemy.cs.dead():
-		hit = CombatState.in_arc(
-			global_position, dir, enemy.global_position, bow_range * maxf(strength, 0.05), bow_arc
-		)
+		hit = CombatState.in_arc(global_position, dir, enemy.global_position, length, bow_arc)
 		if hit:
 			enemy.take_hit(bow_damage * strength, hit_stagger * strength)
+			debug_event.emit("dealt", {
+				"dmg": bow_damage * strength, "stagger": hit_stagger * strength,
+				"charge": 0.0, "chain": 0, "cap": 0, "source": "arrow",
+			})
+	debug_event.emit("shot", {
+		"from": global_position, "dir": dir, "len": length, "arc": bow_arc,
+		"hit": hit, "strength": strength,
+	})
 	Metrics.log_event(
 		"arrow_fired",
 		{"strength": snappedf(strength, 0.01), "deg": snappedf(rad_to_deg(atan2(-dir.x, -dir.z)), 1.0), "hit": hit}
 	)
 
 
+# Fire direction for the bow: opposite the drag, projected into the world.
+func bow_aim() -> Vector3:
+	var cam := get_viewport().get_camera_3d()
+	if cam:
+		var world := CameraRelative.project(-g.drag, cam.global_transform.basis)
+		if world != Vector3.ZERO:
+			return world
+	return -global_transform.basis.z
+
+
+func bow_length(strength: float) -> float:
+	return bow_range * maxf(strength, 0.05)
+
+
+# The arc of the swing in progress. The hit test and debug_draw both read this,
+# so the drawn fan cannot drift from what actually connects.
+func swing_arc() -> float:
+	return attack_arc * (1.0 + charge_arc_mult * _swing_level)
+
+
+# The arc the NEXT swing would get if you flicked now.
+func preview_arc() -> float:
+	var level := ss.charge_level() if ss.chain == 0 else 0.0
+	return attack_arc * (1.0 + charge_arc_mult * level)
+
+
 # The damage path for everything that hits the player. Block has to intercept
 # before take_damage, so enemy.gd calls this rather than cs.take_damage directly.
 func receive_hit(amount: float) -> String:
 	var was_blocking := ss.stance == Stance.BLOCK
+	var hp_before := cs.health
 	var r := ss.resolve_hit(cs, amount)
+	debug_event.emit("taken", {"result": r, "amount": amount, "lost": hp_before - cs.health})
 	if r == "broken" and was_blocking:
 		g.release()
 		Metrics.log_event("stance_exited", {"stance": "block", "why": "broken", "chain": 0, "rejected": g.rejected})
@@ -341,15 +382,18 @@ func _apply_hit() -> void:
 	if not active_now or _swing_used or enemy == null or enemy.cs.dead():
 		return
 	# The strike direction is the cone-clamped yaw, not the body's facing.
-	var fwd := Vector3(-sin(_strike_yaw), 0.0, -cos(_strike_yaw))
-	var arc := attack_arc * (1.0 + charge_arc_mult * _swing_level)
-	if not CombatState.in_arc(global_position, fwd, enemy.global_position, attack_reach, arc):
+	var fwd := Vector3(-sin(strike_yaw), 0.0, -cos(strike_yaw))
+	if not CombatState.in_arc(global_position, fwd, enemy.global_position, attack_reach, swing_arc()):
 		return
 	_swing_used = true
-	enemy.take_hit(
-		attack_damage * (1.0 + charge_damage_mult * _swing_level),
-		hit_stagger * (1.0 + charge_stagger_mult * _swing_level)
-	)
+	chain_hits += 1
+	var dmg := attack_damage * (1.0 + charge_damage_mult * _swing_level)
+	var stag := hit_stagger * (1.0 + charge_stagger_mult * _swing_level)
+	enemy.take_hit(dmg, stag)
+	debug_event.emit("dealt", {
+		"dmg": dmg, "stagger": stag, "charge": _swing_level,
+		"chain": ss.chain, "cap": ss.chain_cap, "source": "sword",
+	})
 	Metrics.log_event("enemy_hit", {"enemy_hp": snappedf(enemy.cs.health, 0.1), "charge": snappedf(_swing_level, 0.01)})
 
 

@@ -37,6 +37,30 @@ a stance, **0 while the bow is drawn**. Dodge is the one input with no gesture
 involvement, deliberately (§7): the input most needed under pressure has to be
 instant and unambiguous.
 
+### Debug view — `F1` (or `` ` ``) toggles
+
+Drawn by `debug_draw.gd`. It only observes the game and never takes part in it,
+so removing the node changes nothing about play.
+
+- **Arcs** on the ground are the real hit test: reach and half-angle, measured
+  to the target's **centre** (the small cross), height ignored. Grey while a
+  stance is held (the arc your next flick would get, with the ±cone edges),
+  yellow in wind-up, red while active, then a fading red ghost so the six active
+  frames can actually be seen. **An outline turns green while the other actor's
+  centre is inside it**: that swing would connect right now.
+- **Enemy**: its attack arc and a faint `standoff` ring.
+- **Bow**: the shot cone while drawing (green outline = on target), then a tracer
+  and a travelling arrowhead on release. Green means hit, red means miss.
+- **Rings** under an actor: cyan for i-frames, magenta for stagger, grey for
+  blocking, white for an armed parry.
+- **Labels** over each head: stance, state with its timer, `chain n/3`, hits
+  `landed` this chain, charge or draw %, health and stamina, and `PUNISH` when
+  the enemy is open.
+- **Popups**: damage dealt with `hit n/3`, charge, and either `STAGGER 0.94s` or
+  `no stagger (committed)` (the trade rule, visible). Also damage taken,
+  `BLOCK`, `GUARD BREAK`, `PARRY`, `DODGED`, `CLAMPED asked +x°`, and arrow
+  strength.
+
 ### Calibrate the flick threshold first
 
 `1200 px/s` is a guess, and whether macOS reports retina motion in physical or

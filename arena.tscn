@@ -4,6 +4,7 @@
 [ext_resource type="Script" path="res://debug_hud.gd" id="2_hud"]
 [ext_resource type="Script" path="res://enemy.gd" id="3_enemy"]
 [ext_resource type="Script" path="res://fight.gd" id="4_fight"]
+[ext_resource type="Script" path="res://debug_draw.gd" id="5_debug"]
 
 [sub_resource type="Environment" id="env"]
 background_mode = 1
@@ -153,6 +154,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, -0.5)
 visible = false
 mesh = SubResource("me_line")
 surface_material_override/0 = SubResource("mat_hit")
+
+[node name="DebugDraw" type="Node3D" parent="."]
+script = ExtResource("5_debug")
 
 [node name="HUD" type="CanvasLayer" parent="."]
 
