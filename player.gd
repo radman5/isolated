@@ -37,10 +37,13 @@ signal debug_event(kind: String, data: Dictionary)
 @export var hit_stagger := 0.75
 
 @export_group("Knockback")
-@export var attack_knockback := 0.6  # metres, light hit
-## The last link of a chain sends them flying. Earlier links do not knock at all,
-## so the targets stay where the path said they were.
+@export var attack_knockback := 1.2  # metres, light hit
+## The last link of a chain sends them flying straight ahead.
 @export var finisher_knock_mult := 2.5
+## Metres each earlier chain link throws its target off to the side, clearing the
+## dash line so you are not boxed in when the chain ends. Chain links shove even
+## an enemy committed to a swing; plain swings do not.
+@export var link_knockback := 2.5
 @export var bow_knockback := 1.0
 ## How fast a shove bleeds off. The distance is the same either way; this only
 ## changes whether it is a snap or a slide.
@@ -138,6 +141,7 @@ var _chain: Array = []  # enemies to visit, in order; non-empty only while it pl
 var _link_t := 0.0
 var _chain_vel := Vector3.ZERO
 var _hitstop_until := 0  # msec
+var _ghosting := false  # passing through enemies: while dodging or chaining
 var _preview := ImmediateMesh.new()
 var _hit_this_swing := {}  # instance ids already hit by the swing in progress
 var _knock := Vector3.ZERO
@@ -256,6 +260,7 @@ func _physics_process(delta: float) -> void:
 
 	_aim(delta, cam)
 	_run_chain(delta)
+	_update_ghost()
 	_apply_hit()
 	_bow_visuals(cam)
 	_move(delta, wish)
@@ -383,10 +388,6 @@ func _release_charge() -> void:
 	chain_hits = 0
 	_knock = Vector3.ZERO
 	cs.hold_active = true
-	# Dash through bodies: a chain through a line of enemies would otherwise stop
-	# at the first capsule in the way.
-	for e in enemies():
-		add_collision_exception_with(e)
 
 
 # Dashes to the current link's target and strikes it on arrival. Targets are
@@ -417,8 +418,16 @@ func _run_chain(delta: float) -> void:
 
 func _land_link(e: Node, dir: Vector3) -> void:
 	var last := link_i == _chain.size() - 1
-	var push := dir * attack_knockback * finisher_knock_mult if last else Vector3.ZERO
-	e.take_hit(attack_damage, hit_stagger, push)
+	var push := dir * attack_knockback * finisher_knock_mult
+	if not last:
+		# Off to the side, away from where the next link is going, and a little
+		# ahead. Targets are followed live, so moving this one costs the path nothing.
+		var side := Vector3(-dir.z, 0.0, dir.x)
+		var next = _chain[link_i + 1]
+		if is_instance_valid(next) and side.dot(next.global_position - e.global_position) > 0.0:
+			side = -side
+		push = (side + dir * 0.5).normalized() * link_knockback
+	e.take_hit(attack_damage, hit_stagger, push, true)
 	chain_hits += 1
 	debug_event.emit("dealt", {
 		"dmg": attack_damage, "stagger": hit_stagger, "charge": 0.0,
@@ -435,7 +444,25 @@ func _next_link() -> void:
 	if link_i >= _chain.size():
 		_chain.clear()
 		cs.hold_active = false
-		for e in get_collision_exceptions():
+
+
+# Dodging and chaining pass through enemies, so a roll is a way out of a crowd.
+# Collision comes back only once no enemy overlaps, or the capsules would be
+# left inside each other and shove apart.
+func _update_ghost() -> void:
+	var want := cs.state == CombatState.DODGE or chaining()
+	if not want and _ghosting:
+		for e in enemies():
+			if Vector2(e.global_position.x - global_position.x, e.global_position.z - global_position.z).length() < 1.0:
+				want = true
+				break
+	if want == _ghosting:
+		return
+	_ghosting = want
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if want:
+			add_collision_exception_with(e)
+		else:
 			remove_collision_exception_with(e)
 
 

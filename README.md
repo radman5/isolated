@@ -50,8 +50,10 @@ up to the lowest of:
 
 **The strike.** Each link dashes to `link_standoff` (1.1m) short of its target in
 `link_dash_time` (0.07s), passing through other bodies. The freeze lasts `hitstop_time`
-(0.05s), or `hitstop_last` (0.10s) on the last link. Earlier links don't knock back,
-so targets stay where the path said they were.
+(0.05s), or `hitstop_last` (0.10s) on the last link. Each earlier link throws its
+target `link_knockback` (2.5m) off to the side, away from where the next link goes, so
+the dash line is clear when the chain ends. Targets are followed live, so this
+doesn't break the path.
 
 Verified in a scripted run with 4 enemies in a line: a click moved the player 0.000m.
 A 1.2s hold showed 3/3 links (the skill cap). Release hit Enemy1, 2 and 3 in order, a
@@ -146,11 +148,17 @@ strategies (bots, not hands):
 
 ## Knockback
 
-Your hits shove enemies straight away from you: 0.6 m light, and
-×2.5 on the last link of a chain (earlier links don't knock). A **committed enemy isn't moved**
-(`armor_knock_mult` 0), because pushing it out of range mid-swing cancels its
-attack through distance, which is stunlock again. Enemies shove you too, and a dodge
-shrugs it off.
+A click shoves enemies straight away from you by 1.2m. A chain throws each target
+2.5m to the side, then the last one ×2.5 straight ahead. A **committed enemy isn't
+moved by a click** (`armor_knock_mult` 0), because pushing it out of range mid-swing
+cancels its attack through distance, which is stunlock again. A chain moves it anyway:
+it's the expensive attack, and clearing a path is its job. Enemies shove you too, and a
+dodge shrugs it off.
+
+**Dodging and chaining pass through enemies**, so a roll gets you out of a crowd.
+Collision comes back once you are clear of every enemy's capsule. I-frames are
+unchanged (0.05–0.28s of the 0.40s roll): passing through isn't the same as being
+untouchable.
 
 ## The enemy
 
@@ -217,7 +225,7 @@ Starting numbers. Record where you actually land; that record is the deliverable
 | `link_dash_time` / `link_standoff` | 0.07 s / 1.1 m | |
 | `hitstop_time` / `hitstop_last` | 0.05 s / 0.10 s | |
 | `hit_stagger` | 0.75 | |
-| `attack_knockback` / `finisher_knock_mult` | 0.6 m / 2.5 | |
+| `attack_knockback` / `link_knockback` / `finisher_knock_mult` | 1.2 m / 2.5 m / 2.5 | |
 | `dodge_time` / `dodge_distance` / `dodge_cost` | 0.40 / 3.5 / 30 | |
 | `iframe_start` / `iframe_end` | 0.05 / 0.28 | |
 | `regen_rate` / `regen_delay` | 45 / 0.55 | |

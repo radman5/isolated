@@ -80,7 +80,9 @@ func _ready() -> void:
 # `knock` is a displacement in metres, not a velocity. The hit interrupts
 # whatever the enemy was doing unless it is committed to a swing, and then it
 # neither flinches nor moves: see CombatState.stagger for why.
-func take_hit(damage_: float, stagger_secs: float, knock := Vector3.ZERO) -> void:
+# `ignore_armor` is for the player's chain strike, which clears a path through
+# enemies whether they are mid-swing or not.
+func take_hit(damage_: float, stagger_secs: float, knock := Vector3.ZERO, ignore_armor := false) -> void:
 	if cs.dead():
 		return
 	cs.take_damage(damage_)
@@ -92,7 +94,7 @@ func take_hit(damage_: float, stagger_secs: float, knock := Vector3.ZERO) -> voi
 		apply_knock(knock)
 		Metrics.log_event("enemy_staggered", {"id": name, "secs": snappedf(stagger_secs, 0.01)})
 	else:
-		apply_knock(knock * armor_knock_mult)
+		apply_knock(knock if ignore_armor else knock * armor_knock_mult)
 
 
 # Decays exponentially, so a starting speed of distance * friction covers
