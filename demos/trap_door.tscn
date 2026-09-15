@@ -1,0 +1,93 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://player.gd" id="1_player"]
+[ext_resource type="Script" path="res://debug_hud.gd" id="2_hud"]
+[ext_resource type="Script" path="res://fight.gd" id="4_fight"]
+[ext_resource type="Script" path="res://debug_draw.gd" id="5_debug"]
+[ext_resource type="Script" path="res://follow_camera.gd" id="6_camera"]
+[ext_resource type="Script" path="res://character_view.gd" id="7_view"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/characters/Ranger.glb" id="8_ranger"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/weapons/sword_1handed.gltf" id="9_sword"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/weapons/bow_withString.gltf" id="10_bow"]
+[ext_resource type="Script" path="res://trap_door.gd" id="11_trap"]
+[ext_resource type="PackedScene" path="res://heavy_enemy.tscn" id="12_heavy"]
+
+[sub_resource type="Environment" id="env"]
+background_mode = 1
+background_color = Color(0.08, 0.09, 0.11, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.42, 0.45, 0.52, 1)
+ambient_light_energy = 1.0
+
+[sub_resource type="StandardMaterial3D" id="mat_ground"]
+albedo_color = Color(0.22, 0.23, 0.25, 1)
+
+[sub_resource type="BoxShape3D" id="sh_ground"]
+size = Vector3(40, 1, 40)
+
+[sub_resource type="BoxMesh" id="me_ground"]
+size = Vector3(40, 1, 40)
+
+[sub_resource type="CapsuleShape3D" id="sh_player"]
+radius = 0.5
+height = 2.0
+
+[node name="TrapDoor" type="Node3D"]
+script = ExtResource("4_fight")
+spawn_enemies = false
+stage = "4"
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.7808688, 0.50901514, -0.362143, 0, 0.5797117, 0.8148217, 0.6246951, -0.63626885, 0.45267874, 0, 6, 0)
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(0.75927126, -0.49852195, 0.4183096, 0, 0.6427876, 0.76604444, -0.6507742, -0.58163553, 0.4880502, 5.22887, 10.575556, 6.1006274)
+fov = 50.0
+script = ExtResource("6_camera")
+
+[node name="Ground" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground"]
+shape = SubResource("sh_ground")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Ground"]
+mesh = SubResource("me_ground")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="Player" type="CharacterBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 5)
+script = ExtResource("1_player")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
+shape = SubResource("sh_player")
+
+[node name="Model" type="Node3D" parent="Player"]
+script = ExtResource("7_view")
+model = ExtResource("8_ranger")
+right_hand = ExtResource("9_sword")
+left_hand = ExtResource("10_bow")
+left_hand_rotation = Vector3(0, 0, 180)
+
+[node name="Trap" type="Node3D" parent="."]
+script = ExtResource("11_trap")
+
+[node name="Heavy" parent="." instance=ExtResource("12_heavy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, -7)
+
+[node name="DebugDraw" type="Node3D" parent="."]
+script = ExtResource("5_debug")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Label" type="Label" parent="HUD"]
+offset_left = 12.0
+offset_top = 8.0
+offset_right = 520.0
+offset_bottom = 420.0
+script = ExtResource("2_hud")
+player_path = NodePath("../../Player")

@@ -50,6 +50,10 @@ const CombatState := preload("res://combat_state.gd")
 @export_group("Health")
 ## Pierce budget an arrow spends to pass through this enemy.
 @export var toughness := 1.0
+## Armour. Multiplies all damage, stagger and knockback this enemy receives.
+@export var damage_taken_mult := 1.0
+@export var stagger_taken_mult := 1.0
+@export var knock_taken_mult := 1.0
 @export var health_max := 100.0
 @export var regen_rate := 22.0  # stamina regen: how soon it can swing again
 @export var regen_delay := 0.30
@@ -87,16 +91,39 @@ func _ready() -> void:
 func take_hit(damage_: float, stagger_secs: float, knock := Vector3.ZERO, ignore_armor := false) -> void:
 	if cs.dead():
 		return
+	damage_ *= damage_taken_mult
+	stagger_secs *= stagger_taken_mult
+	knock *= knock_taken_mult
 	cs.take_damage(damage_)
 	if cs.dead():
 		apply_knock(knock)  # corpses still get shoved; it reads as the finishing blow
 		return
-	cs.stagger(stagger_secs)
+	if stagger_secs > 0.0:
+		cs.stagger(stagger_secs)
 	if cs.state == CombatState.STAGGER:
 		apply_knock(knock)
 		Metrics.log_event("enemy_staggered", {"id": name, "secs": snappedf(stagger_secs, 0.01)})
 	else:
 		apply_knock(knock if ignore_armor else knock * armor_knock_mult)
+
+
+# Dropped through a trap. Dead on the spot, whatever the armour says.
+func fall() -> void:
+	if cs.dead():
+		return
+	cs.health = 0.0
+	Metrics.log_event("enemy_fell", {"id": name})
+	_drop(self)
+
+
+# Shared with player.gd: no collision, no more thinking, sink out of sight.
+static func _drop(body: CharacterBody3D) -> void:
+	body.collision_layer = 0
+	body.collision_mask = 0
+	body.set_physics_process(false)
+	var tw := body.create_tween()
+	tw.tween_property(body, "position:y", body.position.y - 6.0, 0.7).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	tw.tween_callback(body.hide)
 
 
 # Decays exponentially, so a starting speed of distance * friction covers

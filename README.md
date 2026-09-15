@@ -194,6 +194,33 @@ Collision comes back once you are clear of every enemy's capsule. I-frames are
 unchanged (0.05–0.28s of the 0.40s roll): passing through isn't the same as being
 untouchable.
 
+## Stage 4 — trap door (`demos/trap_door.tscn`)
+
+Stage 3 (the attrition corridor) was skipped by choice. This demo tests the Stage 4
+question: can you win a fight you'd lose head-on by using the room?
+
+- **The Heavy** (`heavy_enemy.tscn`, the KayKit Knight with axe and shield) takes 5% damage
+  (`damage_taken_mult`), never staggers (`stagger_taken_mult` 0), barely moves when hit
+  (`knock_taken_mult` 0.1), has 300 hp and toughness 10 so arrows stop in it, and hits for
+  **60**. That's 240 sword hits: unwinnable head-on on purpose. Its 0.8s wind-up is the
+  telegraph.
+- **The trap** (`trap_door.gd`) is a 3×3m door held shut by a rope tied to a post. Shoot the
+  rope and the door drops for `open_time` (2s). Anything on it, or walking onto it while it's
+  open, falls and dies, armour or not, including you. One use per fight.
+- **Aiming** at the rope shows a yellow ring on it in the bow preview. Any node in the
+  `shootables` group with `shoot_position()`, `shoot_radius` and `shot()` works the same
+  way. An enemy standing between you and the rope stops the arrow.
+- **Baiting.** The Heavy walks to `standoff` (2.4m) from you and stops. Stand just past the
+  door's edge and it stops on the door.
+
+`fight.gd` has `spawn_enemies` off here, so it uses the placed Heavy and hides the enemy
+buttons, and it logs `stage` "4". New log events: `trap_triggered`, `enemy_fell`,
+`player_fell`.
+
+Verified in a scripted run: a sword hit took the Heavy from 300 to 298.75 with no stagger.
+Standing 3m from the door, the Heavy walked onto it in 2.6s. A full draw at the rope showed
+the ring, the arrow cut it, and the Heavy fell and died while the player stayed alive.
+
 ## The enemy
 
 Telegraph (yellow, 0.60s) → dodge through it → punish during recovery (0.60s). It

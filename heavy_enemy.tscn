@@ -1,0 +1,41 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://enemy.gd" id="1_enemy"]
+[ext_resource type="Script" path="res://character_view.gd" id="2_view"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/characters/Knight.glb" id="3_model"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/weapons/Skeleton_Axe.gltf" id="4_axe"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/weapons/shield_round.gltf" id="5_shield"]
+
+[sub_resource type="CapsuleShape3D" id="sh_body"]
+radius = 0.6
+height = 2.0
+
+[node name="Heavy" type="CharacterBody3D"]
+script = ExtResource("1_enemy")
+move_speed = 2.2
+windup_time = 0.8
+recovery_time = 0.7
+attack_range = 2.8
+standoff = 2.4
+attack_arc = 65.0
+damage = 60.0
+attack_cost = 40.0
+knockback = 2.5
+armor_knock_mult = 0.0
+toughness = 10.0
+damage_taken_mult = 0.05
+stagger_taken_mult = 0.0
+knock_taken_mult = 0.1
+health_max = 300.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("sh_body")
+
+[node name="Model" type="Node3D" parent="."]
+script = ExtResource("2_view")
+model = ExtResource("3_model")
+right_hand = ExtResource("4_axe")
+left_hand = ExtResource("5_shield")
+model_scale = 1.15
+is_enemy = true
+walk_speed = 2.2

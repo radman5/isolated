@@ -211,6 +211,17 @@ static func bow_draw(nocked_for: float, charge_time: float, min_draw: float) -> 
 	return lerpf(min_draw, 1.0, clampf(nocked_for / maxf(charge_time, 0.001), 0.0, 1.0))
 
 
+# How far along a flat shot from `from` (unit `dir`, `length` long) it passes
+# within `radius` of `point`, or -1 if it does not.
+static func shot_passes(from: Vector3, dir: Vector3, length: float, point: Vector3, radius: float) -> float:
+	var to := Vector2(point.x - from.x, point.z - from.z)
+	var d := Vector2(dir.x, dir.z).normalized()
+	var along := to.dot(d)
+	if along < 0.0 or along > length + radius:
+		return -1.0
+	return along if absf(to.cross(d)) <= radius else -1.0
+
+
 # `count` directions spread `spread_deg` apart, centred on `dir`.
 static func fan_dirs(dir: Vector3, count: int, spread_deg: float) -> Array[Vector3]:
 	var out: Array[Vector3] = []

@@ -18,6 +18,7 @@ const CameraRelative := preload("res://camera_relative.gd")
 const Gesture := preload("res://gesture.gd")
 const Stance := preload("res://stance_state.gd")
 const ArrowModel := preload("res://assets/kaykit/weapons/arrow_bow.gltf")
+const Enemy := preload("res://enemy.gd")
 
 # For debug_draw.gd only. Gameplay never listens to this; kinds are
 # "swing", "dealt", "taken", "shot".
@@ -559,10 +560,13 @@ func _fire_bow() -> void:
 			planned.append({"at": maxf(Vector2(to.x, to.z).length() - 0.4, 0.0), "e": e, "n": n})
 			hits += 1
 			max_pierce = maxi(max_pierce, n)
+		for s in arrow.shoots:
+			planned.append({"at": s.at, "shoot": s.node})
+		planned.sort_custom(func(a, b): return a.at < b.at)
 		_launch(dir, arrow.len, planned, strength)
 		debug_event.emit("shot", {
 			"from": global_position, "dir": dir, "len": arrow.len,
-			"arc": bow_arc, "hit": not targets.is_empty(), "strength": strength,
+			"arc": bow_arc, "hit": not targets.is_empty() or not arrow.shoots.is_empty(), "strength": strength,
 		})
 	Metrics.log_event("arrow_fired", {
 		"strength": snappedf(strength, 0.01), "arrows": arrow_count, "hits": hits, "max_pierce": max_pierce,
@@ -588,7 +592,11 @@ func _fly_arrows(delta: float) -> void:
 		f.node.global_position = f.from + f.dir * f.travelled
 		while not f.hits.is_empty() and f.hits[0].at <= f.travelled:
 			var h: Dictionary = f.hits.pop_front()
-			_arrow_hit(h.e, h.n, f.dir, f.strength)
+			if h.has("shoot"):
+				if is_instance_valid(h.shoot):
+					h.shoot.shot()
+			else:
+				_arrow_hit(h.e, h.n, f.dir, f.strength)
 		if f.travelled >= f.len:
 			f.node.queue_free()
 	_flights = _flights.filter(func(f): return f.travelled < f.len)
@@ -630,7 +638,14 @@ func arrow_hits(strength: float) -> Array:
 		if not targets.is_empty():
 			var last: Vector3 = targets[-1].global_position - global_position
 			reach = Vector2(last.x, last.z).length()
-		out.append({"dir": dir, "len": reach, "targets": targets})
+		# Things an arrow can hit that are not enemies (a trap's rope): anything in
+		# the "shootables" group with shoot_position(), shoot_radius and shot().
+		var shoots := []
+		for s in get_tree().get_nodes_in_group("shootables"):
+			var along := Stance.shot_passes(global_position, dir, reach, s.shoot_position(), s.shoot_radius)
+			if along >= 0.0:
+				shoots.append({"node": s, "at": along})
+		out.append({"dir": dir, "len": reach, "targets": targets, "shoots": shoots})
 	return out
 
 
@@ -646,6 +661,16 @@ func bow_aim() -> Vector3:
 
 func bow_length(strength: float) -> float:
 	return bow_range * maxf(strength, 0.05)
+
+
+# Dropped through a trap.
+func fall() -> void:
+	if cs.dead():
+		return
+	cs.health = 0.0
+	_chain.clear()
+	Metrics.log_event("player_fell", {})
+	Enemy._drop(self)
 
 
 # The damage path for everything that hits the player. Block has to intercept
@@ -766,6 +791,9 @@ func _aim_preview() -> void:
 			_ribbon(origin, end, 0.04, line_col)
 			if not hit:
 				_ring(end, 0.18, 0.05, line_col)
+			for s in arrow.shoots:
+				var p: Vector3 = s.node.shoot_position()
+				_ring(Vector3(p.x, 0.05, p.z), s.node.shoot_radius + 0.15, 0.07, Color(1.0, 0.85, 0.2, 0.95))
 			for n in arrow.targets.size():
 				var a := pow(1.0 - pierce_falloff, n)
 				_ring(_ground(arrow.targets[n]), 0.55, 0.07, Color(0.35, 1.0, 0.45, 0.95 * a))

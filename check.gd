@@ -39,6 +39,7 @@ func _initialize() -> void:
 	_arrow_path()
 	_fan_dirs()
 	_bow_draw()
+	_shot_passes()
 	print("OK")
 	quit()
 
@@ -616,3 +617,13 @@ func _bow_draw() -> void:
 	assert(is_equal_approx(Stance.bow_draw(0.0, 1.0, 0.2), 0.2), "nocking did not start at min_draw")
 	assert(is_equal_approx(Stance.bow_draw(0.5, 1.0, 0.2), 0.6), "not linear over charge_time")
 	assert(Stance.bow_draw(5.0, 1.0, 0.2) == 1.0, "went past full draw")
+
+
+# 27. An arrow's line passing a point: along distance when within radius, else -1.
+func _shot_passes() -> void:
+	var o := Vector3.ZERO
+	var fwd := Vector3(0, 0, -1)
+	assert(is_equal_approx(Stance.shot_passes(o, fwd, 10.0, Vector3(0.3, 2, -5), 0.45), 5.0), "missed a rope just off the line")
+	assert(Stance.shot_passes(o, fwd, 10.0, Vector3(0.6, 0, -5), 0.45) < 0.0, "hit a rope outside the radius")
+	assert(Stance.shot_passes(o, fwd, 4.0, Vector3(0, 0, -5), 0.45) < 0.0, "hit a rope past the arrow's range")
+	assert(Stance.shot_passes(o, fwd, 10.0, Vector3(0, 0, 3), 0.45) < 0.0, "hit a rope behind the shooter")

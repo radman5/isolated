@@ -21,6 +21,11 @@ const SLOTS := [
 ]
 
 @export var reset_delay := 1.2
+## Off for a hand-built encounter: fight.gd uses the enemies already placed in the
+## scene, and the enemy-count buttons are hidden.
+@export var spawn_enemies := true
+## Written to fight_start so logs from different demos can be told apart.
+@export var stage := "2c"
 
 static var enemy_count := 1
 
@@ -33,14 +38,16 @@ var _arrow_label := Label.new()
 
 
 func _ready() -> void:
-	for i in enemy_count:
+	for i in (enemy_count if spawn_enemies else 0):
 		var e := EnemyScene.instantiate()
 		e.name = "Enemy%d" % (i + 1)
 		e.position = SLOTS[i] + Vector3(0, 1.05, 0)
 		add_child(e)
 	_build_controls()
 	_t0 = _now()
-	Metrics.log_event("fight_start", {"stage": "2c", "enemies": enemy_count})
+	Metrics.log_event("fight_start", {
+		"stage": stage, "enemies": get_tree().get_nodes_in_group("enemies").size() if not spawn_enemies else enemy_count,
+	})
 
 
 func _process(delta: float) -> void:
@@ -78,9 +85,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	match event.physical_keycode:
 		KEY_MINUS, KEY_KP_SUBTRACT:
-			_change_enemies(-1)
+			if spawn_enemies:
+				_change_enemies(-1)
 		KEY_EQUAL, KEY_KP_ADD:
-			_change_enemies(1)
+			if spawn_enemies:
+				_change_enemies(1)
 		KEY_BRACKETLEFT:
 			_change_arrows(-1)
 		KEY_BRACKETRIGHT:
@@ -116,7 +125,8 @@ func _build_controls() -> void:
 	rows.offset_top = 8.0
 	var enemy_label := Label.new()
 	enemy_label.text = "  enemies %d  " % enemy_count
-	rows.add_child(_row(enemy_label, _change_enemies))
+	if spawn_enemies:
+		rows.add_child(_row(enemy_label, _change_enemies))
 	_arrow_label.text = "  arrows %d  " % player.arrow_count
 	rows.add_child(_row(_arrow_label, _change_arrows))
 	$HUD.add_child(rows)
