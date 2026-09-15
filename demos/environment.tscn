@@ -1,0 +1,390 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://player.gd" id="player"]
+[ext_resource type="Script" path="res://debug_hud.gd" id="hud"]
+[ext_resource type="Script" path="res://fight.gd" id="fight"]
+[ext_resource type="Script" path="res://debug_draw.gd" id="debug"]
+[ext_resource type="Script" path="res://follow_camera.gd" id="camera"]
+[ext_resource type="Script" path="res://character_view.gd" id="view"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/characters/Ranger.glb" id="ranger"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/weapons/sword_1handed.gltf" id="sword"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/weapons/bow_withString.gltf" id="bow"]
+[ext_resource type="PackedScene" path="res://enemy.tscn" id="skel"]
+[ext_resource type="PackedScene" path="res://heavy_enemy.tscn" id="heavy"]
+[ext_resource type="Script" path="res://traps/hazard_zone.gd" id="zone"]
+[ext_resource type="Script" path="res://traps/hanging_weight.gd" id="weight"]
+[ext_resource type="Script" path="res://traps/oil_jar.gd" id="jar"]
+[ext_resource type="Script" path="res://traps/lantern.gd" id="lantern"]
+[ext_resource type="Script" path="res://traps/gate.gd" id="gate"]
+[ext_resource type="Script" path="res://traps/pressure_plate.gd" id="plate"]
+[ext_resource type="Script" path="res://traps/trap_door.gd" id="trapdoor"]
+
+[sub_resource type="Environment" id="env"]
+background_mode = 1
+background_color = Color(0.05, 0.06, 0.08, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.42, 0.45, 0.52, 1)
+ambient_light_energy = 1.0
+
+[sub_resource type="StandardMaterial3D" id="mat_ground"]
+albedo_color = Color(0.22, 0.23, 0.25, 1)
+
+[sub_resource type="CapsuleShape3D" id="sh_player"]
+radius = 0.5
+height = 2.0
+
+[sub_resource type="BoxShape3D" id="shp_PlazaStart"]
+size = Vector3(20, 1, 14)
+
+[sub_resource type="BoxMesh" id="mesh_PlazaStart"]
+size = Vector3(20, 1, 14)
+
+[sub_resource type="BoxShape3D" id="shp_Bridge"]
+size = Vector3(3, 1, 7)
+
+[sub_resource type="BoxMesh" id="mesh_Bridge"]
+size = Vector3(3, 1, 7)
+
+[sub_resource type="BoxShape3D" id="shp_PlazaBridge"]
+size = Vector3(18, 1, 10)
+
+[sub_resource type="BoxMesh" id="mesh_PlazaBridge"]
+size = Vector3(18, 1, 10)
+
+[sub_resource type="BoxShape3D" id="shp_EastLedge"]
+size = Vector3(10, 1, 10)
+
+[sub_resource type="BoxMesh" id="mesh_EastLedge"]
+size = Vector3(10, 1, 10)
+
+[sub_resource type="BoxShape3D" id="shp_BridgeNorth"]
+size = Vector3(3, 1, 6)
+
+[sub_resource type="BoxMesh" id="mesh_BridgeNorth"]
+size = Vector3(3, 1, 6)
+
+[sub_resource type="BoxShape3D" id="shp_PlazaWeight"]
+size = Vector3(16, 1, 14)
+
+[sub_resource type="BoxMesh" id="mesh_PlazaWeight"]
+size = Vector3(16, 1, 14)
+
+[sub_resource type="BoxShape3D" id="shp_CorridorOil"]
+size = Vector3(5, 1, 4)
+
+[sub_resource type="BoxMesh" id="mesh_CorridorOil"]
+size = Vector3(5, 1, 4)
+
+[sub_resource type="BoxShape3D" id="shp_PlazaOil"]
+size = Vector3(14, 1, 14)
+
+[sub_resource type="BoxMesh" id="mesh_PlazaOil"]
+size = Vector3(14, 1, 14)
+
+[sub_resource type="BoxShape3D" id="shp_CorridorMud"]
+size = Vector3(5, 1, 4)
+
+[sub_resource type="BoxMesh" id="mesh_CorridorMud"]
+size = Vector3(5, 1, 4)
+
+[sub_resource type="BoxShape3D" id="shp_PlazaMud"]
+size = Vector3(16, 1, 16)
+
+[sub_resource type="BoxMesh" id="mesh_PlazaMud"]
+size = Vector3(16, 1, 16)
+
+[sub_resource type="BoxShape3D" id="shp_CorridorPlate"]
+size = Vector3(5, 1, 8)
+
+[sub_resource type="BoxMesh" id="mesh_CorridorPlate"]
+size = Vector3(5, 1, 8)
+
+[sub_resource type="BoxShape3D" id="shp_PlazaTrap"]
+size = Vector3(16, 1, 14)
+
+[sub_resource type="BoxMesh" id="mesh_PlazaTrap"]
+size = Vector3(16, 1, 14)
+
+[node name="Environment" type="Node3D"]
+script = ExtResource("fight")
+spawn_enemies = false
+stage = "4-env"
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.7808688, 0.50901514, -0.362143, 0, 0.5797117, 0.8148217, 0.6246951, -0.63626885, 0.45267874, 0, 6, 0)
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(0.75927126, -0.49852195, 0.4183096, 0, 0.6427876, 0.76604444, -0.6507742, -0.58163553, 0.4880502, 5.22887, 10.575556, 6.1006274)
+fov = 50.0
+script = ExtResource("camera")
+
+[node name="PlazaStart" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 17)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="PlazaStart"]
+shape = SubResource("shp_PlazaStart")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="PlazaStart"]
+mesh = SubResource("mesh_PlazaStart")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="Bridge" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 6.5)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Bridge"]
+shape = SubResource("shp_Bridge")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Bridge"]
+mesh = SubResource("mesh_Bridge")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="PlazaBridge" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, -2)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="PlazaBridge"]
+shape = SubResource("shp_PlazaBridge")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="PlazaBridge"]
+mesh = SubResource("mesh_PlazaBridge")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="EastLedge" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 17, -0.5, -2)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="EastLedge"]
+shape = SubResource("shp_EastLedge")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="EastLedge"]
+mesh = SubResource("mesh_EastLedge")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="BridgeNorth" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, -9)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="BridgeNorth"]
+shape = SubResource("shp_BridgeNorth")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="BridgeNorth"]
+mesh = SubResource("mesh_BridgeNorth")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="PlazaWeight" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, -18)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="PlazaWeight"]
+shape = SubResource("shp_PlazaWeight")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="PlazaWeight"]
+mesh = SubResource("mesh_PlazaWeight")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="CorridorOil" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10.5, -0.5, -18)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CorridorOil"]
+shape = SubResource("shp_CorridorOil")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="CorridorOil"]
+mesh = SubResource("mesh_CorridorOil")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="PlazaOil" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, -0.5, -18)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="PlazaOil"]
+shape = SubResource("shp_PlazaOil")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="PlazaOil"]
+mesh = SubResource("mesh_PlazaOil")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="CorridorMud" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10.5, -0.5, -18)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CorridorMud"]
+shape = SubResource("shp_CorridorMud")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="CorridorMud"]
+mesh = SubResource("mesh_CorridorMud")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="PlazaMud" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, -0.5, -18)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="PlazaMud"]
+shape = SubResource("shp_PlazaMud")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="PlazaMud"]
+mesh = SubResource("mesh_PlazaMud")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="CorridorPlate" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, -0.5, -6)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CorridorPlate"]
+shape = SubResource("shp_CorridorPlate")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="CorridorPlate"]
+mesh = SubResource("mesh_CorridorPlate")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="PlazaTrap" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, -0.5, 4)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="PlazaTrap"]
+shape = SubResource("shp_PlazaTrap")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="PlazaTrap"]
+mesh = SubResource("mesh_PlazaTrap")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="Player" type="CharacterBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 21)
+script = ExtResource("player")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
+shape = SubResource("sh_player")
+
+[node name="Model" type="Node3D" parent="Player"]
+script = ExtResource("view")
+model = ExtResource("ranger")
+right_hand = ExtResource("sword")
+left_hand = ExtResource("bow")
+left_hand_rotation = Vector3(0, 0, 180)
+
+[node name="BridgeSkel1" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 9.0)
+
+[node name="BridgeSkel2" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 7.4)
+
+[node name="BridgeSkel3" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 5.8)
+
+[node name="BridgeSkel4" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 4.2)
+
+[node name="LedgeSkel1" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14.5, 1.05, -1.0)
+
+[node name="LedgeSkel2" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16.5, 1.05, -3.5)
+
+[node name="Weight" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -17)
+script = ExtResource("weight")
+
+[node name="WeightHeavy" parent="." instance=ExtResource("heavy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, -22)
+
+[node name="OilJar" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 0, -20.5)
+script = ExtResource("jar")
+
+[node name="Lantern" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 0, -18)
+script = ExtResource("lantern")
+
+[node name="OilSkel1" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -22, 1.05, -18)
+
+[node name="OilSkel2" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -18, 1.05, -18.5)
+
+[node name="OilSkel3" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -21.5, 1.05, -22.5)
+
+[node name="OilSkel4" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -23, 1.05, -19)
+
+[node name="OilSkel5" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -17, 1.05, -20.5)
+
+[node name="Mud" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 0, -18)
+script = ExtResource("zone")
+kind = "slow"
+size = Vector2(10, 12)
+amount = 0.35
+colour = Color(0.28, 0.22, 0.12, 0.9)
+
+[node name="Gate" type="Node3D" parent="."]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 10.5, 0, -18)
+script = ExtResource("gate")
+width = 4.0
+
+[node name="MudSkel1" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 19, 1.05, -18)
+
+[node name="MudSkel2" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 21, 1.05, -20)
+
+[node name="MudSkel3" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 23, 1.05, -17)
+
+[node name="MudSkel4" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 1.05, -23)
+
+[node name="MudSkel5" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 24, 1.05, -21)
+
+[node name="MudSkel6" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 18, 1.05, -22)
+
+[node name="Spikes" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, -7.5)
+script = ExtResource("zone")
+kind = "kill"
+size = Vector2(5, 4)
+active = false
+colour = Color(0.6, 0.62, 0.68, 0.85)
+
+[node name="SpikePlate" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, -3.5)
+script = ExtResource("plate")
+zones = [NodePath("../Spikes")]
+
+[node name="FlameWall" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, -9.5)
+script = ExtResource("zone")
+kind = "burn"
+size = Vector2(5, 2)
+amount = 30.0
+active = false
+colour = Color(1, 0.45, 0.1, 0.8)
+
+[node name="FlamePlate" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, -11.5)
+script = ExtResource("plate")
+zones = [NodePath("../FlameWall")]
+
+[node name="PlateSkel1" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 19, 1.05, -1.0)
+
+[node name="PlateSkel2" parent="." instance=ExtResource("skel")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22, 1.05, 1.0)
+
+[node name="TrapDoorTrap" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, 5)
+script = ExtResource("trapdoor")
+
+[node name="TrapHeavy" parent="." instance=ExtResource("heavy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 1.05, 9)
+
+[node name="DebugDraw" type="Node3D" parent="."]
+script = ExtResource("debug")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Label" type="Label" parent="HUD"]
+offset_left = 12.0
+offset_top = 8.0
+offset_right = 520.0
+offset_bottom = 420.0
+script = ExtResource("hud")
+player_path = NodePath("../../Player")
+

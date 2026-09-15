@@ -14,7 +14,7 @@ extends Node3D
 @export var post_offset := Vector3(2.4, 0.0, 0.0)
 @export var open_time := 2.0
 ## How close to the rope an arrow's line must pass, metres.
-@export var shoot_radius := 0.45
+@export var shoot_radius := 0.6
 
 var _door_pivot := Node3D.new()
 var _rope := MeshInstance3D.new()
@@ -90,8 +90,8 @@ func _set_open(on: bool) -> void:
 
 
 func _on_body_entered(b: Node3D) -> void:
-	if _open and b.has_method("fall"):
-		b.fall()
+	if _open and b.has_method("env_kill"):
+		b.env_kill("fall")
 
 
 func _box(s: Vector3, col: Color) -> MeshInstance3D:

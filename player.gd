@@ -19,6 +19,7 @@ const Gesture := preload("res://gesture.gd")
 const Stance := preload("res://stance_state.gd")
 const ArrowModel := preload("res://assets/kaykit/weapons/arrow_bow.gltf")
 const Enemy := preload("res://enemy.gd")
+const Hazard := preload("res://traps/hazard.gd")
 
 # For debug_draw.gd only. Gameplay never listens to this; kinds are
 # "swing", "dealt", "taken", "shot".
@@ -187,6 +188,7 @@ var _reject_cool := 0.0
 
 
 func _ready() -> void:
+	add_to_group("player")
 	cs.stamina = stamina_max
 	cs.health_max = health_max
 	cs.health = health_max
@@ -663,14 +665,23 @@ func bow_length(strength: float) -> float:
 	return bow_range * maxf(strength, 0.05)
 
 
-# Dropped through a trap.
-func fall() -> void:
+# Killed by the room: a pit, a falling weight, spikes. Ignores armour, blocking
+# and i-frames - the whole point of §4's hazard is beating what the sword cannot.
+func env_kill(how: String) -> void:
 	if cs.dead():
 		return
 	cs.health = 0.0
 	_chain.clear()
-	Metrics.log_event("player_fell", {})
-	Enemy._drop(self)
+	Metrics.log_event("player_killed_by_env", {"how": how})
+	if how == "fall":
+		Enemy._drop(self)
+
+
+# Fire and the like: straight to health, past block and i-frames.
+func env_damage(amount: float) -> void:
+	if cs.dead():
+		return
+	cs.health = maxf(0.0, cs.health - amount)
 
 
 # The damage path for everything that hits the player. Block has to intercept
@@ -853,6 +864,8 @@ func _move(delta: float, wish: Vector3) -> void:
 	elif cs.state == CombatState.STAGGER:
 		target = Vector3.ZERO
 
+	target *= Hazard.speed_mult(get_tree().get_nodes_in_group("hazards"), global_position)
+
 	# A live shove owns horizontal velocity outright, so steering cannot walk
 	# straight back through it.
 	if _knock.length() > 0.2:
@@ -867,5 +880,9 @@ func _move(delta: float, wish: Vector3) -> void:
 		_knock = Vector3.ZERO
 		velocity.x = move_toward(velocity.x, target.x, ground_accel * delta)
 		velocity.z = move_toward(velocity.z, target.z, ground_accel * delta)
-	velocity.y -= gravity * delta
+	# A chain dash crosses gaps: it is a lunge, not a fall.
+	velocity.y = 0.0 if chaining() else velocity.y - gravity * delta
 	move_and_slide()
+	# Off the edge of the world.
+	if global_position.y < -4.0:
+		env_kill("fall")

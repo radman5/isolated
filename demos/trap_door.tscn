@@ -9,7 +9,7 @@
 [ext_resource type="PackedScene" path="res://assets/kaykit/characters/Ranger.glb" id="8_ranger"]
 [ext_resource type="PackedScene" path="res://assets/kaykit/weapons/sword_1handed.gltf" id="9_sword"]
 [ext_resource type="PackedScene" path="res://assets/kaykit/weapons/bow_withString.gltf" id="10_bow"]
-[ext_resource type="Script" path="res://trap_door.gd" id="11_trap"]
+[ext_resource type="Script" path="res://traps/trap_door.gd" id="11_trap"]
 [ext_resource type="PackedScene" path="res://heavy_enemy.tscn" id="12_heavy"]
 
 [sub_resource type="Environment" id="env"]

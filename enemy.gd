@@ -13,12 +13,17 @@ extends CharacterBody3D
 # group. Nothing should look an enemy up by node name.
 
 const CombatState := preload("res://combat_state.gd")
+const Hazard := preload("res://traps/hazard.gd")
 
 @export_group("Move")
 @export var move_speed := 3.0
 @export var accel := 20.0
 @export var turn_speed := 7.0
 @export var gravity := 24.0
+
+## Ignores the player until they come this close, then stays awake. Keeps the
+## stations in the environment demo from all waking at once.
+@export var aggro_range := 9.0
 
 @export_group("Attack")
 @export var windup_time := 0.60  # the telegraph. If you cannot react, raise it.
@@ -69,6 +74,7 @@ const TUNABLES := [
 ]
 
 var cs := CombatState.new()
+var _awake := false
 var _swing_used := false
 var _was_active := false
 var _knock := Vector3.ZERO
@@ -107,13 +113,23 @@ func take_hit(damage_: float, stagger_secs: float, knock := Vector3.ZERO, ignore
 		apply_knock(knock if ignore_armor else knock * armor_knock_mult)
 
 
-# Dropped through a trap. Dead on the spot, whatever the armour says.
-func fall() -> void:
+# Killed by the room. Dead on the spot, whatever the armour says.
+func env_kill(how: String) -> void:
 	if cs.dead():
 		return
 	cs.health = 0.0
-	Metrics.log_event("enemy_fell", {"id": name})
-	_drop(self)
+	Metrics.log_event("enemy_killed_by_env", {"id": name, "how": how})
+	if how == "fall":
+		_drop(self)
+
+
+# Fire and the like: past armour, straight to health.
+func env_damage(amount: float) -> void:
+	if cs.dead():
+		return
+	cs.health = maxf(0.0, cs.health - amount)
+	if cs.dead():
+		Metrics.log_event("enemy_killed_by_env", {"id": name, "how": "burn"})
 
 
 # Shared with player.gd: no collision, no more thinking, sink out of sight.
@@ -148,6 +164,11 @@ func _physics_process(delta: float) -> void:
 		to_player = player.global_position - global_position
 		to_player.y = 0.0
 		dist = to_player.length()
+	if not _awake:
+		if dist > aggro_range:
+			_slide(delta, Vector3.ZERO)
+			return
+		_awake = true
 
 	# Attack only from IDLE, only in range, only roughly facing. Everything else
 	# about the swing is CombatState's problem.
@@ -178,7 +199,10 @@ func _physics_process(delta: float) -> void:
 	# what turns recovery into a real punish window.
 	var target := Vector3.ZERO
 	if cs.state == CombatState.IDLE and dist < INF and dist > standoff:
-		target = to_player.normalized() * move_speed
+		# Walk around live hazards and stop at edges. Being shoved off one is
+		# still fair game: only its own walking is careful.
+		var go := Hazard.steer(to_player, global_position, 1.2, _step_blocked)
+		target = go * move_speed * Hazard.speed_mult(get_tree().get_nodes_in_group("hazards"), global_position)
 	if cs.state == CombatState.IDLE and dist < INF and dist > 0.01:
 		var want := atan2(-to_player.x, -to_player.z)
 		rotation.y = rotate_toward(rotation.y, want, turn_speed * delta)
@@ -211,6 +235,17 @@ func _land_hit() -> void:
 			cs.stagger(parry_stagger)
 
 
+# A step is a bad idea if it lands in something live and harmful, or off a ledge.
+func _step_blocked(p: Vector3) -> bool:
+	for z in get_tree().get_nodes_in_group("hazards"):
+		if z.active and z.kind_id() != Hazard.SLOW and Hazard.inside(z.shape(), p):
+			return true
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(p + Vector3(0, 0.6, 0), p + Vector3(0, -1.6, 0))
+	q.exclude = [get_rid()]
+	return space.intersect_ray(q).is_empty()
+
+
 # While a shove is live it owns horizontal velocity outright; blending it with
 # steering would let the AI walk straight back through its own knockback.
 func _slide(delta: float, target: Vector3) -> void:
@@ -224,3 +259,5 @@ func _slide(delta: float, target: Vector3) -> void:
 		velocity.z = move_toward(velocity.z, target.z, accel * delta)
 	velocity.y -= gravity * delta
 	move_and_slide()
+	if global_position.y < -4.0:
+		env_kill("fall")

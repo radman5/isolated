@@ -217,7 +217,7 @@ static func shot_passes(from: Vector3, dir: Vector3, length: float, point: Vecto
 	var to := Vector2(point.x - from.x, point.z - from.z)
 	var d := Vector2(dir.x, dir.z).normalized()
 	var along := to.dot(d)
-	if along < 0.0 or along > length + radius:
+	if along < 0.0 or along > length:
 		return -1.0
 	return along if absf(to.cross(d)) <= radius else -1.0
 

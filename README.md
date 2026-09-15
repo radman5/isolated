@@ -221,6 +221,39 @@ Verified in a scripted run: a sword hit took the Heavy from 300 to 298.75 with n
 Standing 3m from the door, the Heavy walked onto it in 2.6s. A full draw at the rope showed
 the ring, the arrow cut it, and the Heavy fell and died while the player stayed alive.
 
+## Environment traps (`demos/environment.tscn`)
+
+Seven trap stations in one map, each waking at `aggro_range` (9m) so they play as
+separate encounters. `R` restarts. The rules are the same everywhere:
+
+- **The room is neutral.** Falls, the weight and spikes kill anything, armour or not,
+  including you. Fire burns through armour, block and i-frames. Mud slows you too.
+- **Enemies walk around live hazards and stop at edges** (`Hazard.steer`, a five-ray fan
+  plus a downward ray for the floor). Knocking them in still works — only their own
+  walking is careful.
+- **Anything below y = −4 dies.** That is what makes the gaps lethal.
+- **Triggers** are the `shootables` group: `shoot_position()`, `shoot_radius`, `shot()`.
+  Arrows trigger them in flight, and a sword swing triggers one inside its arc.
+
+| Station | What it tests |
+|---|---|
+| **1. Bridge** | 4 skeletons on a 3m bridge over a gap. Chain through them: each link throws its target 2.5m sideways, off the bridge. The last link knocks forward instead, so it stays on. |
+| **2. Ledge** | 2 skeletons on a plateau across a 3m gap. The chain dash ignores gravity, so it carries you over. |
+| **3. Hanging weight** | A block on a rope over a marked circle, with a Heavy. The rope hangs at the post, not over the circle, so the enemy you are baiting is not standing between you and your own trigger. |
+| **4. Oil and fire** | Shoot the jar for a slick (slows, flammable), then the lantern to light it: `burn_dps` 22 for 8s. A lantern with no oil makes a small, brief fire, so the oil is what earns the second arrow. |
+| **5. Mud and gate** | A mud patch at 35% speed in front of a gated corridor. Shoot the lever to drop the portcullis and split the group. |
+| **6. Pressure plates** | Stand on the plate: it flashes for `tell` (0.4s), fires for 1s, then cools for 3s. One drives a spike floor (kills), one a flame wall (burns). Enemies path around both while they are live. |
+| **7. Trap door** | The Stage 4 trap from `demos/trap_door.tscn`, with its own Heavy. |
+
+`traps/hazard.gd` holds the pure parts (zone shapes, how slows stack, steering) and
+`traps/hazard_zone.gd` is the one node behind mud, oil, fire and spikes.
+
+Verified in a scripted run of every station: a chain knocked 2 of 4 skeletons off the
+bridge to their deaths; the weight crushed a 300hp Heavy that shrugs off 95% of sword
+damage; oil then lantern burned all 5 skeletons to 0; skeletons in mud moved at 1.0 m/s
+against a 3.0 base; the closed gate held all 6 back; the spikes killed a skeleton on the
+plate's tell; and the player died in their own open trap door.
+
 ## The enemy
 
 Telegraph (yellow, 0.60s) → dodge through it → punish during recovery (0.60s). It
@@ -260,7 +293,8 @@ Drawn by `debug_draw.gd`, which only observes; removing the node changes nothing
 | `camera_relative.gd` | Screen/stick direction → world direction. |
 | `follow_camera.gd` | Smooth fixed-angle follow camera. |
 | `player.gd` | Input, aim, movement, hits. Every tunable is `@export`. |
-| `enemy.gd` · `enemy.tscn` | The enemy. |
+| `enemy.gd` · `enemy.tscn` · `heavy_enemy.tscn` | The enemies: skeleton, and the armoured Heavy. |
+| `traps/*.gd` | Hazard zones and traps: trap door, hanging weight, oil jar, lantern, gate, pressure plate. |
 | `fight.gd` | Spawning, enemy-count controls, fight clock, win/lose, reset. |
 | `character_view.gd` | KayKit model, weapons and animations for an actor. Visual only. |
 | `debug_draw.gd` · `debug_hud.gd` | Debug view and text overlay. |

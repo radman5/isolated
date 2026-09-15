@@ -12,6 +12,7 @@ extends SceneTree
 const CombatState := preload("res://combat_state.gd")
 const Gesture := preload("res://gesture.gd")
 const Stance := preload("res://stance_state.gd")
+const Hazard := preload("res://traps/hazard.gd")
 const CamRel := preload("res://camera_relative.gd")
 const DT := 1.0 / 60.0
 
@@ -40,6 +41,8 @@ func _initialize() -> void:
 	_fan_dirs()
 	_bow_draw()
 	_shot_passes()
+	_hazard_shapes()
+	_hazard_steer()
 	print("OK")
 	quit()
 
@@ -626,4 +629,71 @@ func _shot_passes() -> void:
 	assert(is_equal_approx(Stance.shot_passes(o, fwd, 10.0, Vector3(0.3, 2, -5), 0.45), 5.0), "missed a rope just off the line")
 	assert(Stance.shot_passes(o, fwd, 10.0, Vector3(0.6, 0, -5), 0.45) < 0.0, "hit a rope outside the radius")
 	assert(Stance.shot_passes(o, fwd, 4.0, Vector3(0, 0, -5), 0.45) < 0.0, "hit a rope past the arrow's range")
+	# An enemy stops the arrow short: a rope behind that enemy is not triggered.
+	assert(Stance.shot_passes(o, fwd, 6.4, Vector3(0, 0, -7), 0.7) < 0.0, "triggered a rope beyond where the arrow stopped")
 	assert(Stance.shot_passes(o, fwd, 10.0, Vector3(0, 0, 3), 0.45) < 0.0, "hit a rope behind the shooter")
+
+
+# 28. Hazard zones: flat shapes, and the slowest overlapping one wins.
+func _hazard_shapes() -> void:
+	var circle := {"pos": Vector3.ZERO, "radius": 2.0}
+	assert(Hazard.inside(circle, Vector3(1.9, 0, 0)), "missed inside a circle zone")
+	assert(not Hazard.inside(circle, Vector3(2.1, 0, 0)), "hit outside a circle zone")
+	assert(Hazard.inside(circle, Vector3(0, 9, 0)), "height broke a circle zone")
+
+	var box := {"pos": Vector3(10, 0, 0), "size": Vector2(4, 2), "yaw": 0.0}
+	assert(Hazard.inside(box, Vector3(11.9, 0, 0.9)), "missed inside a box zone")
+	assert(not Hazard.inside(box, Vector3(12.1, 0, 0)), "hit past a box zone's length")
+	assert(not Hazard.inside(box, Vector3(10, 0, 1.1)), "hit past a box zone's width")
+	# Rotated 90 deg, so its long side now runs along Z.
+	var turned := {"pos": Vector3(10, 0, 0), "size": Vector2(4, 2), "yaw": PI * 0.5}
+	assert(Hazard.inside(turned, Vector3(10, 0, 1.9)), "a rotated box did not turn")
+	assert(not Hazard.inside(turned, Vector3(11.9, 0, 0)), "a rotated box kept its old length")
+
+	var mud = FakeZone.new(Hazard.SLOW, 0.5, circle, true)
+	var tar = FakeZone.new(Hazard.SLOW, 0.3, circle, true)
+	var off = FakeZone.new(Hazard.SLOW, 0.1, circle, false)
+	var fire = FakeZone.new(Hazard.BURN, 0.1, circle, true)
+	assert(Hazard.speed_mult([], Vector3.ZERO) == 1.0, "no zones was not full speed")
+	assert(Hazard.speed_mult([mud], Vector3(5, 0, 0)) == 1.0, "slowed while outside the zone")
+	assert(Hazard.speed_mult([mud, tar], Vector3.ZERO) == 0.3, "overlapping zones did not take the slowest")
+	assert(Hazard.speed_mult([off], Vector3.ZERO) == 1.0, "an inactive zone still slowed")
+	assert(Hazard.speed_mult([fire], Vector3.ZERO) == 1.0, "a burn zone slowed as well")
+
+
+class FakeZone:
+	var kind: int
+	var amount: float
+	var active: bool
+	var _shape: Dictionary
+
+	func _init(k: int, a: float, s: Dictionary, on: bool) -> void:
+		kind = k
+		amount = a
+		_shape = s
+		active = on
+
+	func kind_id() -> int:
+		return kind
+
+	func shape() -> Dictionary:
+		return _shape
+
+
+# 29. Steering: straight at the target when clear, the first free fan angle when
+#     not, and nowhere at all when boxed in.
+func _hazard_steer() -> void:
+	var clear := func(_p): return false
+	var fwd := Vector3(0, 0, -1)
+	var got: Vector3 = Hazard.steer(fwd * 5.0, Vector3.ZERO, 1.2, clear)
+	assert(got.is_equal_approx(fwd), "walked off the straight line with nothing in the way")
+
+	# A hazard dead ahead: the first 30 deg step out is taken.
+	var ahead := func(p): return absf(p.x) < 0.5 and p.z < 0.0
+	got = Hazard.steer(fwd * 5.0, Vector3.ZERO, 1.2, ahead)
+	assert(is_equal_approx(rad_to_deg(fwd.signed_angle_to(got, Vector3.UP)), 30.0),
+		"did not sidestep by the first fan angle: %f" % rad_to_deg(fwd.signed_angle_to(got, Vector3.UP)))
+
+	var boxed := func(_p): return true
+	assert(Hazard.steer(fwd * 5.0, Vector3.ZERO, 1.2, boxed) == Vector3.ZERO, "walked into a wall of hazards")
+	assert(Hazard.steer(Vector3.ZERO, Vector3.ZERO, 1.2, clear) == Vector3.ZERO, "steered with no target")
