@@ -117,7 +117,7 @@ func _draw_player(delta: float) -> void:
 				_swing_fan(pos, _p.rotation.y, _p.attack_arc, _p.attack_reach, GREY, 0.05, target, 0.5)
 			elif ss.stance == Stance.BOW:
 				var dir: Vector3 = _p.bow_aim()
-				var length: float = _p.bow_length(_p.g.drag_strength())
+				var length: float = _p.bow_length(_p.draw_strength)
 				var yaw := atan2(-dir.x, -dir.z)
 				_swing_fan(pos, yaw, _p.bow_arc, length, GREY, 0.10, target)
 				_line(_flat(pos), _flat(pos) + dir.normalized() * length, WHITE)
@@ -134,7 +134,7 @@ func _draw_player(delta: float) -> void:
 			int((cs.stamina + _p.link_cost) / _p.link_cost),
 		]
 	elif ss.stance == Stance.BOW:
-		var s: float = _p.g.drag_strength()
+		var s: float = _p.draw_strength
 		extra = "  draw %.0f%% · pierce budget %.1f · arrows %d" % [s * 100.0, _p.pierce_budget(s), _p.arrow_count]
 	var flags := ""
 	if cs.invulnerable():

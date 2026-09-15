@@ -110,7 +110,13 @@ signal debug_event(kind: String, data: Dictionary)
 @export var pierce_falloff := 0.15
 ## Degrees between arrows in a volley.
 @export var arrow_spread_deg := 8.0
-@export var drag_max_px := 300.0
+## Pull back at least this far (screen px) to nock the arrow. From then on the
+## draw grows with time, not with how far you pull; the pull only aims.
+@export var bow_draw_threshold := 60.0
+## Seconds from nocked to full draw.
+@export var bow_charge_time := 1.0
+## Draw the moment the arrow is nocked, as a fraction of full.
+@export var bow_min_draw := 0.2
 
 @export_group("Block")
 @export var block_drain := 5.0
@@ -142,7 +148,8 @@ var ss := Stance.new()
 
 var weapon := Stance.SWORD  # which weapon LMB draws
 var last_flick_deg := 0.0
-var draw_strength := 0.0
+var draw_strength := 0.0  # bow draw 0..1; also bends the bowstring
+var _nocked_for := -1.0  # seconds since the pull passed bow_draw_threshold; -1 = not yet
 
 var dodge_dir := Vector3.FORWARD  # read by character_view to pick the dodge animation
 var strike_yaw := 0.0  # direction of the current swing
@@ -237,7 +244,6 @@ func _physics_process(delta: float) -> void:
 		ss.set(k, get(k))
 	g.flick_threshold = flick_threshold
 	g.refractory = flick_refractory
-	g.drag_max_px = drag_max_px
 
 	g.tick(delta)
 	_reject_cool = maxf(0.0, _reject_cool - delta)
@@ -247,7 +253,15 @@ func _physics_process(delta: float) -> void:
 		and Input.is_action_pressed("attack") and _swing_press == _press_id
 	)
 	ss.tick(delta)
-	draw_strength = g.drag_strength() if ss.stance == Stance.BOW else 0.0
+	if ss.stance == Stance.BOW:
+		if _nocked_for < 0.0 and g.drag.length() >= bow_draw_threshold:
+			_nocked_for = 0.0
+		elif _nocked_for >= 0.0:
+			_nocked_for += delta
+		draw_strength = Stance.bow_draw(_nocked_for, bow_charge_time, bow_min_draw)
+	else:
+		_nocked_for = -1.0
+		draw_strength = 0.0
 
 	var cam := get_viewport().get_camera_3d()
 	var wish := Vector3.ZERO
@@ -502,7 +516,7 @@ func apply_knock(v: Vector3) -> void:
 
 
 func _fire_bow() -> void:
-	var strength := g.drag_strength()
+	var strength := draw_strength
 	if cs.stamina < ss.bow_cost:
 		Metrics.log_event("attack_refused", {"stamina": snappedf(cs.stamina, 0.1)})
 		return
@@ -675,7 +689,7 @@ func _aim_preview() -> void:
 			from = at
 		_preview.surface_end()
 	elif ss.stance == Stance.BOW:
-		var strength := g.drag_strength()
+		var strength := draw_strength
 		_preview.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
 		var origin := _ground(self)
 		for arrow in arrow_hits(strength):

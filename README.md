@@ -42,7 +42,10 @@ Facing follows the mouse.
 | **Release** | Dash-strikes each target on the path in turn: invulnerable, a whole-game hit freeze on every hit, and the last link knocks them flying. No target in range: it goes out as a plain arc. |
 | **Space while charging** | Rolls out. The wind-up before the hold point is still committed. |
 
-**Bow:** hold, pull back, release. The draw is how far you pull (`drag_max_px`, 300px).
+**Bow:** hold, pull back to aim, release. Pulling past `bow_draw_threshold` (60px) nocks
+the arrow. From then on the draw grows with **time held**, from `bow_min_draw` (20%) to full over
+`bow_charge_time` (1s), and pulling further only aims. The draw scales range, damage and
+pierce budget.
 While drawing, the ground shows each arrow's line to where it stops, with a ring on every
 enemy it will hit, dimmer after each pierce. The line is green when it hits and faint
 white with an end mark when it hits nothing. Like the chain path, it's always drawn.

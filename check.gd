@@ -38,6 +38,7 @@ func _initialize() -> void:
 	_hold_active()
 	_arrow_path()
 	_fan_dirs()
+	_bow_draw()
 	print("OK")
 	quit()
 
@@ -599,3 +600,11 @@ func _fan_dirs() -> void:
 	assert(is_equal_approx(rad_to_deg(fwd.signed_angle_to(three[2], Vector3.UP)), 8.0), "right arrow not +8")
 	var two: Array = Stance.fan_dirs(fwd, 2, 8.0)
 	assert(is_equal_approx(fwd.signed_angle_to(two[0], Vector3.UP), -fwd.signed_angle_to(two[1], Vector3.UP)), "even fan not symmetric")
+
+
+# 26. Bow draw grows with time once nocked, not with pull distance.
+func _bow_draw() -> void:
+	assert(Stance.bow_draw(-1.0, 1.0, 0.2) == 0.0, "drew before the threshold")
+	assert(is_equal_approx(Stance.bow_draw(0.0, 1.0, 0.2), 0.2), "nocking did not start at min_draw")
+	assert(is_equal_approx(Stance.bow_draw(0.5, 1.0, 0.2), 0.6), "not linear over charge_time")
+	assert(Stance.bow_draw(5.0, 1.0, 0.2) == 1.0, "went past full draw")

@@ -197,6 +197,14 @@ static func arrow_path(
 	return hits
 
 
+# Bow draw from time since the arrow was nocked: 0 before (`nocked_for` < 0), then
+# min_draw rising linearly to 1 over charge_time.
+static func bow_draw(nocked_for: float, charge_time: float, min_draw: float) -> float:
+	if nocked_for < 0.0:
+		return 0.0
+	return lerpf(min_draw, 1.0, clampf(nocked_for / maxf(charge_time, 0.001), 0.0, 1.0))
+
+
 # `count` directions spread `spread_deg` apart, centred on `dir`.
 static func fan_dirs(dir: Vector3, count: int, spread_deg: float) -> Array[Vector3]:
 	var out: Array[Vector3] = []
