@@ -12,10 +12,9 @@ const CombatState := preload("res://combat_state.gd")
 enum { NONE, SWORD, BOW, BLOCK }
 const NAMES := ["none", "sword", "bow", "block"]
 
-# Tunables, mirrored as @export on player.gd. Values from spec §8/§10 EXCEPT
-# dodge cost, regen rate and regen delay, which stay at main's tuned numbers -
-# see README. Adopting §8's versions of those would have made the A/B a
-# comparison of two stamina economies instead of two input grammars.
+# Tunables, mirrored as @export on player.gd. Values from spec §8/§10, except
+# dodge cost, regen rate and regen delay, which keep the Stage 1 numbers that
+# had actually been played.
 var sword_drain := 12.0
 var bow_drain := 8.0
 var block_drain := 5.0

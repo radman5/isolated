@@ -1,5 +1,5 @@
 extends CharacterBody3D
-# Stage 2c: hybrid input, combining the button and gesture builds.
+# Sword input.
 #
 #   Click         a normal swing toward the cursor. It fires on press, so it adds
 #                 no latency.
@@ -29,9 +29,10 @@ signal debug_event(kind: String, data: Dictionary)
 @export var windup_time := 0.22
 @export var active_time := 0.10
 @export var recovery_time := 0.35
-## Metres covered by the dash at the start of the active window. It is
-## front-loaded, so almost all of it happens in the first frames and then it
-## stops dead. That is what makes it read as sudden rather than floaty.
+## Metres covered by the dash at the start of the active window, for chain
+## follow-ups and charged strikes. A plain click does not dash; it just swings.
+## Front-loaded, so almost all of it happens in the first frames and then it stops
+## dead, which is what makes it read as sudden rather than floaty.
 @export var attack_lunge := 1.0
 ## How long the dash lasts. Shorter is snappier. Capped by active_time.
 @export var lunge_time := 0.08
@@ -148,6 +149,7 @@ var _dodge_dir := Vector3.FORWARD
 var strike_yaw := 0.0  # cone-clamped direction of the current swing
 var chain_hits := 0  # hits landed in the current chain
 var _swing_level := 0.0
+var _swing_dashes := false  # chain follow-ups and charged strikes dash; a plain click does not
 var _hit_this_swing := {}  # instance ids already hit by the swing in progress
 var _knock := Vector3.ZERO
 var _hold_spent := false  # set when a charge auto-releases, until the button is let go
@@ -355,6 +357,7 @@ func _start_swing(press: int) -> void:
 	if ss.chain == 0:
 		chain_hits = 0
 	ss.on_swing()
+	_swing_dashes = ss.chain > 1
 	Metrics.log_event(
 		"swing_fired", {"chain": ss.chain, "side": ss.side, "cost": cost, "cancelled": cancelled}
 	)
@@ -377,11 +380,18 @@ func _release_charge() -> void:
 	# Unlike a click, a charged strike turns you: it goes where you aimed it.
 	rotation.y = strike_yaw
 	cs.hold = false
+	_swing_dashes = true
 	Metrics.log_event("charge_released", {
 		"charge": snappedf(_swing_level, 0.01),
 		"aimed": g.drag.length() >= charge_aim_deadzone,
 		"deg": snappedf(rad_to_deg(strike_yaw), 1.0),
 	})
+
+
+func lunge_distance() -> float:
+	if not _swing_dashes:
+		return 0.0
+	return attack_lunge * (1.0 + charge_lunge_mult * _swing_level)
 
 
 func charge_level_now() -> float:
@@ -590,10 +600,9 @@ func _move(delta: float, wish: Vector3) -> void:
 			# dead. Sampled at the frame midpoint, or the ~5-frame sum overshoots by
 			# about a third.
 			var lt := minf(lunge_time, active_time)
-			if cs.t < lt:
+			if cs.t < lt and lunge_distance() > 0.0:
 				var k := 1.0 - minf((cs.t + delta * 0.5) / maxf(lt, 0.001), 1.0)
-				var dist := attack_lunge * (1.0 + charge_lunge_mult * _swing_level)
-				target = strike_dir() * (3.0 * dist / maxf(lt, 0.001)) * k * k
+				target = strike_dir() * (3.0 * lunge_distance() / maxf(lt, 0.001)) * k * k
 		CombatState.WINDUP:
 			if cs.charging():
 				target = wish * move_speed * charge_move_mult

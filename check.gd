@@ -479,7 +479,7 @@ func _block() -> void:
 	assert(ss.resolve_hit(cs, 100.0) == "dodged", "i-frames lost to block")
 
 
-# 17. §11-8: parry sits behind one flag that can be flipped for A/B.
+# 17. §11-8: parry sits behind one flag, off until block feels right.
 func _parry_flag() -> void:
 	# Flag OFF: the refund path is unreachable and a hit still costs and chips.
 	var cs = _fresh()

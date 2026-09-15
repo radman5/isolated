@@ -163,8 +163,8 @@ func _physics_process(delta: float) -> void:
 
 func _land_hit() -> void:
 	# Blocking must intercept before take_damage, so the player owns the damage
-	# path. The "hit"/"dodged" event names are kept verbatim: the button build's
-	# logs and the README's jq lines depend on them.
+	# path. The "hit"/"dodged" event names are kept verbatim: the README's jq
+	# lines depend on them.
 	var r: String = player.receive_hit(damage)
 	var data := {"id": name, "player_hp": snappedf(player.cs.health, 0.1)}
 	var push: Vector3 = player.global_position - global_position
