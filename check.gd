@@ -36,6 +36,7 @@ func _initialize() -> void:
 	_parry_flag()
 	_chain_cancel()
 	_input_buffer()
+	_held_charge()
 	print("OK")
 	quit()
 
@@ -377,17 +378,6 @@ func _chain() -> void:
 	assert(costs[0] == ss.charged_cost, "first swing was not the charged cost")
 	assert(costs[1] == ss.chain_cost and costs[2] == ss.chain_cost, "follow-ups were not light")
 
-	# Charge applies to the first swing only (§4).
-	ss = Stance.new()
-	ss.enter(Stance.SWORD)
-	for i in 120:
-		ss.tick(DT, CombatState.IDLE)
-	assert(ss.charge_level() > 0.99, "charge did not reach max")
-	ss.on_swing()
-	for i in 20:
-		ss.tick(DT, CombatState.IDLE)
-	assert(ss.charge_level() == 0.0, "a chained swing accumulated charge")
-
 	# Letting the window lapse resets the chain.
 	ss = Stance.new()
 	ss.enter(Stance.SWORD)
@@ -594,3 +584,53 @@ func _input_buffer() -> void:
 	ss.buffer_flick(Vector2(1, 0))
 	ss.exit()
 	assert(not ss.has_buffer(), "a buffered swing survived leaving the stance")
+
+
+# 20. Hybrid sword: a held wind-up pauses at the top and charges; releasing sends
+#     it. A click is just a wind-up that was never held, so it adds no latency.
+func _held_charge() -> void:
+	# Not held: releases at windup_time exactly as before.
+	var cs = _fresh()
+	assert(cs.try_attack(15.0))
+	_advance_until(cs, CombatState.ACTIVE)
+
+	# Held: stays in WINDUP past windup_time, and says so.
+	cs = _fresh()
+	cs.hold = true
+	assert(cs.try_attack(15.0))
+	for i in int(cs.windup_time / DT) + 30:
+		cs.advance(DT, false, false)
+	assert(cs.state == CombatState.WINDUP, "a held wind-up released on its own")
+	assert(cs.charging(), "held past windup_time but not charging")
+	assert(cs.charge_seconds() > 0.4, "charge time did not accumulate: %f" % cs.charge_seconds())
+
+	# Letting go sends it on the very next step.
+	cs.hold = false
+	cs.advance(DT, false, false)
+	assert(cs.state == CombatState.ACTIVE, "releasing a charge did not strike")
+
+	# Held but still inside the wind-up: not charging yet, and dodge is ignored.
+	cs = _fresh()
+	cs.hold = true
+	cs.try_attack(15.0)
+	cs.advance(DT, false, false)
+	assert(not cs.charging(), "charging before the wind-up finished")
+	assert(cs.advance(DT, false, true) == "ignored", "dodged out of the committed wind-up")
+	assert(cs.state == CombatState.WINDUP)
+
+	# Once charging, a dodge gets you out.
+	while not cs.charging():
+		cs.advance(DT, false, false)
+	assert(cs.advance(DT, false, true) == "dodge", "could not roll out of a held charge")
+	assert(cs.state == CombatState.DODGE)
+
+	# A charge can be knocked out of; a plain wind-up still cannot.
+	cs = _fresh()
+	cs.hold = true
+	cs.try_attack(15.0)
+	cs.stagger(0.3)
+	assert(cs.state == CombatState.WINDUP, "staggered out of a committed wind-up")
+	while not cs.charging():
+		cs.advance(DT, false, false)
+	cs.stagger(0.3)
+	assert(cs.state == CombatState.STAGGER, "a held charge was not interruptible")

@@ -35,7 +35,6 @@ var stance_break_time := 1.0
 var buffer_window := 0.4
 
 var stance := NONE
-var charge := 0.0
 var chain := 0
 var side := -1  # alternates per swing; §4 wants rhythm with no combo system
 var chain_timer := 0.0
@@ -54,7 +53,6 @@ func name_of() -> String:
 
 func enter(s: int) -> void:
 	stance = s
-	charge = 0.0
 	chain = 0
 	chain_timer = 0.0
 	buffered = Vector2.ZERO
@@ -62,7 +60,6 @@ func enter(s: int) -> void:
 
 func exit() -> void:
 	stance = NONE
-	charge = 0.0
 	chain = 0
 	chain_timer = 0.0
 	parry_until = -1.0
@@ -80,10 +77,6 @@ func drain() -> float:
 		BLOCK:
 			return block_drain
 	return 0.0
-
-
-func charge_level() -> float:
-	return clampf(charge / maxf(charge_time, 0.001), 0.0, 1.0)
 
 
 # ponytail: v2 hook (§4). The cap and the reset are two separate conditions on
@@ -114,8 +107,6 @@ func tick(delta: float, action_state: int) -> void:
 		buffer_age += delta
 		if buffer_age > buffer_window:
 			buffered = Vector2.ZERO
-	if stance == SWORD and chain == 0 and action_state == CombatState.IDLE:
-		charge = minf(charge + delta, charge_time)
 	if chain > 0:
 		# The window is measured from the frame the action FSM returns to IDLE,
 		# not from swing start: a full swing is 0.67s, so a 0.45s window
@@ -138,7 +129,6 @@ func on_swing() -> void:
 	side = -side
 	chain += 1
 	chain_timer = 0.0
-	charge = 0.0
 
 
 func arm_parry() -> void:

@@ -96,18 +96,26 @@ func _draw_player(delta: float) -> void:
 
 	match cs.state:
 		CombatState.WINDUP:
-			var k: float = cs.t / maxf(cs.windup_time, 0.001)
-			_swing_fan(pos, _p.strike_yaw, _p.swing_arc(), _p.attack_reach, YELLOW, 0.08 + 0.25 * k, target)
-			_requested_line(pos)
+			if cs.charging():
+				# Where the charged strike will go if released now, and how wide.
+				var dir: Vector3 = _p.charge_aim_dir()
+				var cyaw := atan2(-dir.x, -dir.z)
+				var lvl: float = _p.charge_level_now()
+				_swing_fan(pos, cyaw, _p.preview_arc(), _p.attack_reach, YELLOW, 0.12 + 0.35 * lvl, target)
+				_line(_flat(pos), _flat(pos) + dir.normalized() * _p.attack_reach * 1.6, WHITE)
+				if _p.cone_deg < 179.0:
+					_cone_edges(pos, _p.rotation.y, _p.cone_deg, _p.attack_reach * 1.35, GREY)
+			else:
+				var k: float = cs.t / maxf(cs.windup_time, 0.001)
+				_swing_fan(pos, _p.strike_yaw, _p.swing_arc(), _p.attack_reach, YELLOW, 0.08 + 0.25 * k, target)
 		CombatState.ACTIVE:
 			_p_ghost = {"pos": pos, "yaw": _p.strike_yaw, "arc": _p.swing_arc(), "reach": _p.attack_reach, "age": 0.0}
 			_swing_fan(pos, _p.strike_yaw, _p.swing_arc(), _p.attack_reach, RED, 0.45, target)
 			_requested_line(pos)
 		_:
-			if ss.stance == Stance.SWORD:
-				# Where a flick is allowed to land, then the arc it would get now.
-				_cone_edges(pos, _p.rotation.y, ss.cone_deg, _p.attack_reach * 1.35, GREY)
-				_swing_fan(pos, _p.rotation.y, _p.preview_arc(), _p.attack_reach, GREY, 0.07, target)
+			if _p.weapon == Stance.SWORD and ss.stance == Stance.NONE and cs.state == CombatState.IDLE:
+				# What a click would hit right now.
+				_swing_fan(pos, _p.rotation.y, _p.attack_arc, _p.attack_reach, GREY, 0.05, target, 0.5)
 			elif ss.stance == Stance.BOW:
 				var dir: Vector3 = _p.bow_aim()
 				var length: float = _p.bow_length(_p.g.drag_strength())
@@ -119,10 +127,10 @@ func _draw_player(delta: float) -> void:
 
 	_p_label.position = pos + Vector3(0, 1.35, 0) - _cam_right() * 0.7
 	_p_label.modulate = _state_colour(cs.state)
-	var head: String = "FREE" if ss.stance == Stance.NONE else ss.name_of().to_upper()
+	var head: String = (Stance.NAMES[_p.weapon] if ss.stance == Stance.NONE else ss.name_of()).to_upper()
 	var extra := ""
-	if ss.stance == Stance.SWORD and ss.chain == 0:
-		extra = "  charge %.2f" % ss.charge_level()
+	if cs.charging():
+		extra = "  CHARGE %.0f%%" % (_p.charge_level_now() * 100.0)
 	elif ss.stance == Stance.BOW:
 		extra = "  draw %.0f%%" % (_p.g.drag_strength() * 100.0)
 	var flags := ""

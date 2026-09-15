@@ -39,7 +39,7 @@ func _process(_delta: float) -> void:
 		text += (
 			"\n\nstance   %-6s charge %.2f  chain %d/%d  side %s\nflick    %+4.0f deg  %5.0f px/s   near-miss %d\npeak     %5.0f px/s  (set flick_threshold from this)\ncone     %s      draw %.2f   parry %s"
 			% [
-				ss.name_of(), ss.charge_level(), ss.chain, ss.chain_cap,
+				ss.name_of(), _p.charge_level_now(), ss.chain, ss.chain_cap,
 				"L" if ss.side < 0 else "R",
 				_p.last_flick_deg, g.vel.length(), g.rejected,
 				g.peak,
@@ -60,4 +60,4 @@ func _process(_delta: float) -> void:
 				e.name, "dead" if ec.dead() else ec.state_name(), ec.t, ec.health,
 				"  PUNISH" if open and not ec.dead() else "",
 			]
-	text += "\n\nLMB stance/flick  RMB block  Space dodge  1/2 weapon\nC = camera-blame   R = restart   Esc = free cursor   -/+ enemies   F1 debug"
+	text += "\n\nLMB click swing / hold charge + pull back aim  RMB block  Space dodge  1/2 weapon\nC = camera-blame   R = restart   Esc = free cursor   -/+ enemies   F1 debug"

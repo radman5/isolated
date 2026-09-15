@@ -38,7 +38,7 @@ func _ready() -> void:
 		add_child(e)
 	_build_controls()
 	_t0 = _now()
-	Metrics.log_event("fight_start", {"stage": "2b", "enemies": enemy_count})
+	Metrics.log_event("fight_start", {"stage": "2c", "enemies": enemy_count})
 
 
 func _process(delta: float) -> void:

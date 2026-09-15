@@ -1,7 +1,8 @@
 # isolated — ISOLA combat prototype
 
-> **Branch `stage2b-gesture`.** The button build is frozen at tag `stage2-button`.
-> Both share the stagger implementation; `git merge-base` proves it.
+> **Branch `stage2c-hybrid`** combines the two input schemes. The button build is
+> frozen at tag `stage2-button`, and the pure-gesture build is the `stage2b-gesture`
+> branch.
 
 Stages 1-2 of `../isola/ISOLA_Combat_Test_Plan.md`. **Disposable.** Per §8 what
 carries forward is the tuning knowledge and the numbers, not this code.
@@ -26,20 +27,43 @@ $GODOT --editor --path .                             # then F5
 cancelled, stamina gates both verbs, i-frames open and close on the right frames,
 stamina regen waits then stops at the cap. It needs no scene and no window.
 
-## Controls (gesture build)
+## Controls (branch `stage2c-hybrid`)
 
-`WASD` move · **hold LMB** draw weapon · **flick the mouse** to strike ·
-**hold RMB** block · `Space` dodge · `1`/`2` sword/bow · `Esc` free the cursor ·
-`R` restart · `C` flag a camera-contributed hit
+This combines the button and gesture builds. `WASD` move · `Space` dodge ·
+**hold RMB** block · `1`/`2` sword/bow · `-`/`=` enemy count · `F1` debug ·
+`Esc` free the cursor · `R` restart. Facing follows the mouse.
 
-Facing follows the mouse. Rotation is clamped by stance — 720°/s free, 180°/s in
-a stance, **0 while the bow is drawn**. Dodge is the one input with no gesture
-involvement, deliberately (§7): the input most needed under pressure has to be
-instant and unambiguous.
+**Sword**
+
+| Input | Result |
+|---|---|
+| **Click** | Normal swing at the cursor: base damage and knockback. It fires on press, so a click adds no delay. |
+| **Hold** | The swing pauses at the top of its wind-up and charges (up to `charge_time`, 1s). Move at 35%. |
+| **Hold + pull back** | Aims the charged strike the opposite way, like drawing the bow. The strike turns you to face it. |
+| **Release** | Sends the charged strike. Charge scales damage, arc, stagger, knockback and lunge. |
+| **Click again** | Buffered, and chains into the next swing (up to 3). Hold the click that starts a swing to charge that swing. |
+| **Space while charging** | Rolls out. The wind-up before the hold point is still committed. |
+
+A click and a charge are the same swing. The only difference is whether the
+button is still down when the wind-up would release, which is the Dark Souls
+heavy-attack trick: pressing never waits, and a charge never forces an extra
+swing first. Each swing belongs to the press that started it, so clicking again
+to chain queues the next swing instead of charging the current one.
+
+Charging drains `sword_drain` stamina; running out sends the strike. Pull-back
+under `charge_aim_deadzone` (25px) strikes straight ahead. `cone_deg` (180 =
+anywhere) limits how far to the side you can aim a charge.
+
+The bow is unchanged: hold, pull back, release.
+
+Verified in a scripted run: a click hits exactly one wind-up (0.22s) after the
+press; a 1s hold with pull-back released at 83% charge for 45.8 damage; three
+rhythm clicks landed a 3-hit chain; dodging from a charge rolled out; and a
+click followed by click-and-hold kept swing 1 light and charged swing 2.
 
 ### Chaining — buffer and cancel
 
-Flick in rhythm, don't wait. A flick made while a swing is still coming out is
+Click in rhythm, don't wait. A click made while a swing is still coming out is
 **buffered** (the label shows `BUFFERED`) and fires on the first frame it legally
 can. A buffered follow-up may also **cancel the previous swing's recovery**, so a
 3-hit chain comes out in about 0.6s (the `CANCEL` popup shows each one).

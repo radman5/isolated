@@ -1,7 +1,15 @@
 extends CharacterBody3D
-# Stage 2b: gesture input. Hold to commit, mouse motion to express, release to
-# resolve. Only the input layer differs from the button build — the swing that a
-# flick fires is the same committed WINDUP/ACTIVE/RECOVERY the enemy uses.
+# Stage 2c: hybrid input, combining the button and gesture builds.
+#
+#   Click         a normal swing toward the cursor. It fires on press, so it adds
+#                 no latency.
+#   Hold          the swing pauses at the top of its wind-up and charges; pull
+#                 back to aim like the bow, release to send it.
+#   Click again   buffered, and chains into the next swing.
+#
+# A click and a charge are the same swing: the only difference is whether the
+# button is still down when the wind-up would release. Both are the same committed
+# WINDUP/ACTIVE/RECOVERY the enemy uses.
 
 const CombatState := preload("res://combat_state.gd")
 const CameraRelative := preload("res://camera_relative.gd")
@@ -86,7 +94,16 @@ signal debug_event(kind: String, data: Dictionary)
 @export var chain_cost := 10.0
 @export var chain_window := 0.45
 @export var chain_cap := 3
-@export var cone_deg := 60.0
+## How far either side of facing a charged strike can be aimed. 180 aims
+## anywhere, like the bow; lower it to make positioning matter more.
+@export var cone_deg := 180.0
+## Move speed while holding a charge, as a fraction of move_speed.
+@export var charge_move_mult := 0.35
+## Pull-back shorter than this (screen px) aims straight ahead, so an accidental
+## wobble while holding does not swing sideways.
+@export var charge_aim_deadzone := 25.0
+## Extra lunge distance at full charge, as a multiple of attack_lunge.
+@export var charge_lunge_mult := 1.0
 
 @export_group("Bow")
 @export var bow_drain := 8.0
@@ -133,6 +150,14 @@ var chain_hits := 0  # hits landed in the current chain
 var _swing_level := 0.0
 var _hit_this_swing := {}  # instance ids already hit by the swing in progress
 var _knock := Vector3.ZERO
+var _hold_spent := false  # set when a charge auto-releases, until the button is let go
+# Each press gets an id, and a swing remembers the press that started it. Only
+# that press can hold it into a charge. Without this, clicking again to chain
+# during a wind-up would make the CURRENT swing charge instead of queuing the
+# next one.
+var _press_id := 0
+var _swing_press := -1
+var _buffered_press := -1
 var _was_active := false
 var _reject_cool := 0.0
 
@@ -157,24 +182,14 @@ func _ready() -> void:
 func _input(event: InputEvent) -> void:
 	if not (event is InputEventMouseMotion):
 		return
+	# Motion is only a gesture for parry now: the sword is clicked, and a charge
+	# reads the accumulated pull-back rather than individual flicks.
 	var flick := g.sample(event.relative, event.screen_velocity)
-	if flick == Vector2.ZERO:
+	if flick == Vector2.ZERO or ss.stance != Stance.BLOCK:
 		return
 	last_flick_deg = rad_to_deg(atan2(flick.x, -flick.y))
-	Metrics.log_event("flick_detected", {"deg": snappedf(last_flick_deg, 1.0), "mag": snappedf(flick.length(), 1.0)})
-	match ss.stance:
-		Stance.SWORD:
-			if _can_swing_now():
-				_swing(flick)
-			else:
-				# Tekken-style buffer: a flick made while a swing is still coming
-				# out is kept and fires on the first frame it legally can, so
-				# rhythm replaces frame-perfect timing.
-				ss.buffer_flick(flick)
-				Metrics.log_event("flick_buffered", {"state": cs.state_name()})
-		Stance.BLOCK:
-			if ss.try_parry(cs):
-				Metrics.log_event("parry_attempted", {"stamina": snappedf(cs.stamina, 0.1)})
+	if ss.try_parry(cs):
+		Metrics.log_event("parry_attempted", {"stamina": snappedf(cs.stamina, 0.1)})
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -205,6 +220,11 @@ func _physics_process(delta: float) -> void:
 	cone_flash = maxf(0.0, cone_flash - delta)
 	_reject_cool = maxf(0.0, _reject_cool - delta)
 	_stance_edges()
+	cs.hold = (
+		weapon == Stance.SWORD and ss.stance == Stance.NONE
+		and Input.is_action_pressed("attack") and not _hold_spent
+		and _swing_press == _press_id
+	)
 	ss.tick(delta, cs.state)
 	draw_strength = g.drag_strength() if ss.stance == Stance.BOW else 0.0
 
@@ -216,7 +236,8 @@ func _physics_process(delta: float) -> void:
 			cam.global_transform.basis
 		)
 
-	var ev := cs.advance(delta, false, Input.is_action_just_pressed("dodge"), ss.drain())
+	var drain := ss.drain() + (sword_drain if cs.charging() else 0.0)
+	var ev := cs.advance(delta, false, Input.is_action_just_pressed("dodge"), drain)
 	if ev == "dodge":
 		# §7: dodge beats everything. It is the input most needed under pressure.
 		_exit_stance("dodge")
@@ -227,8 +248,14 @@ func _physics_process(delta: float) -> void:
 	# A stance cannot survive being staggered.
 	if cs.state == CombatState.STAGGER and ss.stance != Stance.NONE:
 		_exit_stance("stagger")
-	if ss.stance == Stance.SWORD and ss.has_buffer() and _can_swing_now():
-		_swing(ss.take_buffer())
+	# Holding past empty stamina sends the charge rather than hanging forever.
+	if cs.charging() and cs.stamina <= 0.0:
+		_release_charge()
+		_hold_spent = true
+		cs.hold = false
+	if weapon == Stance.SWORD and ss.stance == Stance.NONE and ss.has_buffer() and _can_swing_now():
+		ss.take_buffer()
+		_start_swing(_buffered_press)
 
 	_aim(delta, cam)
 	_apply_hit()
@@ -237,17 +264,42 @@ func _physics_process(delta: float) -> void:
 
 
 func _stance_edges() -> void:
-	if Input.is_action_just_pressed("attack"):
-		_enter_stance(weapon)
-	elif Input.is_action_just_released("attack"):
-		if ss.stance == Stance.BOW:
+	if weapon == Stance.BOW:
+		if Input.is_action_just_pressed("attack"):
+			_enter_stance(Stance.BOW)
+		elif Input.is_action_just_released("attack") and ss.stance == Stance.BOW:
 			_fire_bow()
-		_exit_stance("release")
+			_exit_stance("release")
+	else:
+		_sword_edges()
 	if Input.is_action_just_pressed("block") and weapon != Stance.BOW:
 		# §5 open question, defaulting to no: ranged safety costs you defence.
 		_enter_stance(Stance.BLOCK)
 	elif Input.is_action_just_released("block") and ss.stance == Stance.BLOCK:
 		_exit_stance("release")
+
+
+func _sword_edges() -> void:
+	if Input.is_action_just_pressed("attack") and ss.stance == Stance.NONE:
+		_hold_spent = false
+		_press_id += 1
+		g.press()  # start collecting pull-back, in case this becomes a charge
+		if _can_swing_now():
+			_start_swing(_press_id)
+		else:
+			_buffered_press = _press_id
+			# Tekken-style buffer: a click made while a swing is still coming out
+			# is kept and fires on the first frame it legally can. A click has no
+			# direction, so any non-zero vector marks it.
+			ss.buffer_flick(Vector2.ONE)
+			Metrics.log_event("click_buffered", {"state": cs.state_name()})
+	elif Input.is_action_just_released("attack"):
+		# cs.hold is still last frame's value here, so charging() is accurate.
+		if cs.charging():
+			_release_charge()
+		if ss.stance == Stance.NONE:
+			g.release()
+		_hold_spent = false
 
 
 func _enter_stance(s: int) -> void:
@@ -274,11 +326,10 @@ func _exit_stance(why: String) -> void:
 	cs.regen_timer = cs.regen_delay
 
 
-func _swing(flick: Vector2) -> void:
+func _start_swing(press: int) -> void:
 	if not ss.can_chain():
 		Metrics.log_event("chain_capped", {"n": ss.chain})
 		return
-	var level := ss.charge_level()
 	var cost := ss.swing_cost()
 	var from_state := cs.state
 	# A follow-up may cancel the previous swing's recovery. An opener may not.
@@ -287,38 +338,65 @@ func _swing(flick: Vector2) -> void:
 		Metrics.log_event("attack_refused", {"stamina": snappedf(cs.stamina, 0.1)})
 		return
 
-	var cam := get_viewport().get_camera_3d()
-	var want := rotation.y
-	if cam:
-		var world := CameraRelative.project(flick, cam.global_transform.basis)
-		if world != Vector3.ZERO:
-			want = atan2(-world.x, -world.z)
-	strike_yaw = Stance.clamp_cone(rotation.y, want, ss.cone_deg)
-	var clamped_by := absf(wrapf(want - strike_yaw, -PI, PI))
-	if clamped_by > 0.01:
-		cone_flash = 0.5
-		Metrics.log_event(
-			"cone_clamped",
-			{"requested_deg": snappedf(rad_to_deg(wrapf(want - rotation.y, -PI, PI)), 1.0),
-			"applied_deg": snappedf(ss.cone_deg, 1.0)}
-		)
+	# A click strikes exactly at the cursor, so snap to it rather than waiting on
+	# the rotation clamp to catch up. Facing then locks for the wind-up; a held
+	# swing is re-aimed when it is released.
+	var yaw = _cursor_yaw(get_viewport().get_camera_3d())
+	if yaw != null:
+		rotation.y = yaw
+	strike_yaw = rotation.y
+	_swing_level = 0.0
+	_swing_press = press
 
 	var cancelled := from_state == CombatState.RECOVERY
 	debug_event.emit("swing", {
-		"clamped": clamped_by > 0.01, "requested_yaw": want,
-		"requested_deg": rad_to_deg(wrapf(want - rotation.y, -PI, PI)),
-		"cancelled": cancelled,
+		"clamped": false, "requested_yaw": strike_yaw, "requested_deg": 0.0, "cancelled": cancelled,
 	})
 	if ss.chain == 0:
 		chain_hits = 0
-	_swing_level = level
 	ss.on_swing()
 	Metrics.log_event(
-		"swing_fired",
-		{"charge": snappedf(level, 0.01), "chain": ss.chain, "side": ss.side, "cost": cost, "cancelled": cancelled}
+		"swing_fired", {"chain": ss.chain, "side": ss.side, "cost": cost, "cancelled": cancelled}
 	)
 	if ss.chain > 1:
 		Metrics.log_event("chain_extended", {"n": ss.chain})
+
+
+# Sends a held swing: charge from how long it was held, aim from the pull-back.
+func _release_charge() -> void:
+	_swing_level = charge_level_now()
+	var dir := charge_aim_dir()
+	var want := atan2(-dir.x, -dir.z)
+	strike_yaw = Stance.clamp_cone(rotation.y, want, cone_deg)
+	if absf(wrapf(want - strike_yaw, -PI, PI)) > 0.01:
+		cone_flash = 0.5
+		Metrics.log_event("cone_clamped", {
+			"requested_deg": snappedf(rad_to_deg(wrapf(want - rotation.y, -PI, PI)), 1.0),
+			"applied_deg": snappedf(cone_deg, 1.0),
+		})
+	# Unlike a click, a charged strike turns you: it goes where you aimed it.
+	rotation.y = strike_yaw
+	cs.hold = false
+	Metrics.log_event("charge_released", {
+		"charge": snappedf(_swing_level, 0.01),
+		"aimed": g.drag.length() >= charge_aim_deadzone,
+		"deg": snappedf(rad_to_deg(strike_yaw), 1.0),
+	})
+
+
+func charge_level_now() -> float:
+	return clampf(cs.charge_seconds() / maxf(charge_time, 0.001), 0.0, 1.0)
+
+
+# Opposite the pull-back, like the bow. Inside the deadzone it strikes ahead.
+func charge_aim_dir() -> Vector3:
+	if g.drag.length() >= charge_aim_deadzone:
+		var cam := get_viewport().get_camera_3d()
+		if cam:
+			var world := CameraRelative.project(-g.drag, cam.global_transform.basis)
+			if world != Vector3.ZERO:
+				return world
+	return -global_transform.basis.z
 
 
 # Alive enemies. Queried every time rather than cached, because fight.gd spawns
@@ -402,8 +480,7 @@ func swing_arc() -> float:
 
 # The arc the NEXT swing would get if you flicked now.
 func preview_arc() -> float:
-	var level := ss.charge_level() if ss.chain == 0 else 0.0
-	return attack_arc * (1.0 + charge_arc_mult * level)
+	return attack_arc * (1.0 + charge_arc_mult * charge_level_now())
 
 
 # The damage path for everything that hits the player. Block has to intercept
@@ -421,8 +498,17 @@ func receive_hit(amount: float) -> String:
 
 func _aim(delta: float, cam: Camera3D) -> void:
 	var rate := Stance.rot_rate(ss.stance, cs.state)
-	if rate <= 0.0 or cam == null:
+	if rate <= 0.0:
 		return
+	var yaw = _cursor_yaw(cam)
+	if yaw != null:
+		rotation.y = rotate_toward(rotation.y, yaw, deg_to_rad(rate) * delta)
+
+
+# Yaw from the player to the point under the cursor, or null if there is none.
+func _cursor_yaw(cam: Camera3D) -> Variant:
+	if cam == null:
+		return null
 	var m := get_viewport().get_mouse_position()
 	# Plane.intersects_ray returns Vector3 OR null - both the untyped var and
 	# the null check are load-bearing.
@@ -430,14 +516,12 @@ func _aim(delta: float, cam: Camera3D) -> void:
 		cam.project_ray_origin(m), cam.project_ray_normal(m)
 	)
 	if hit == null:
-		return
+		return null
 	var to_aim: Vector3 = hit - global_position
 	to_aim.y = 0.0
 	if to_aim.length() < 0.05:
-		return
-	rotation.y = rotate_toward(
-		rotation.y, atan2(-to_aim.x, -to_aim.z), deg_to_rad(rate) * delta
-	)
+		return null
+	return atan2(-to_aim.x, -to_aim.z)
 
 
 func _apply_hit() -> void:
@@ -508,7 +592,11 @@ func _move(delta: float, wish: Vector3) -> void:
 			var lt := minf(lunge_time, active_time)
 			if cs.t < lt:
 				var k := 1.0 - minf((cs.t + delta * 0.5) / maxf(lt, 0.001), 1.0)
-				target = strike_dir() * (3.0 * attack_lunge / maxf(lt, 0.001)) * k * k
+				var dist := attack_lunge * (1.0 + charge_lunge_mult * _swing_level)
+				target = strike_dir() * (3.0 * dist / maxf(lt, 0.001)) * k * k
+		CombatState.WINDUP:
+			if cs.charging():
+				target = wish * move_speed * charge_move_mult
 		CombatState.IDLE:
 			target = wish * move_speed * Stance.move_mult(ss.stance)
 

@@ -33,6 +33,10 @@ var stamina := 100.0
 var regen_timer := 0.0
 var health := 100.0
 var stagger_time := 0.0
+# Player only. While true, a finished wind-up does not release: the swing is held
+# at the top and charges. Letting go sends it. Defaults off, so the enemy is
+# untouched.
+var hold := false
 
 
 # A landed hit freezes the target - but NOT while it is committed to a swing.
@@ -51,12 +55,23 @@ var stagger_time := 0.0
 # Never shortens an existing stagger and never stacks, so a chain cannot lock an
 # enemy out permanently.
 func stagger(secs: float) -> void:
-	if dead() or state == WINDUP or state == ACTIVE:
+	# A held charge is a voluntary stance, not a committed swing, so it can be
+	# knocked out of like a drawn bow.
+	if dead() or (state == WINDUP and not charging()) or state == ACTIVE:
 		return
 	if state == STAGGER and stagger_time - t > secs:
 		return
 	stagger_time = secs
 	_enter(STAGGER)
+
+
+# True once a held wind-up has passed its normal release point.
+func charging() -> bool:
+	return state == WINDUP and hold and t >= windup_time
+
+
+func charge_seconds() -> float:
+	return maxf(0.0, t - windup_time) if state == WINDUP else 0.0
 
 
 func busy() -> bool:
@@ -137,7 +152,7 @@ func advance(
 	# this there is a dropped frame between attacks and it reads as input lag.
 	match state:
 		WINDUP:
-			if t >= windup_time:
+			if t >= windup_time and not hold:
 				_enter(ACTIVE)
 		ACTIVE:
 			if t >= active_time:
@@ -159,6 +174,11 @@ func advance(
 	regen_timer = maxf(0.0, regen_timer - delta)
 	if regen_timer == 0.0 and drain == 0.0:
 		stamina = minf(stamina_max, stamina + regen_rate * delta)
+
+	# Charging is a voluntary hold, so you can roll out of it the way you can
+	# let go of a drawn bow. The wind-up before the hold point stays committed.
+	if dodge_pressed and charging():
+		return _try(DODGE, dodge_cost, "dodge")
 
 	# Input is read only when IDLE. Non-cancellability is structural, not a
 	# flag: there is no code path that can interrupt a swing or a roll.

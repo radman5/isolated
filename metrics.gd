@@ -17,7 +17,7 @@ extends Node
 # build. One word, so `git diff main..stage2b-gesture -- metrics.gd` is the
 # whole proof. Do not derive it from file existence - that is cleverness
 # someone decodes at 3am.
-const INPUT_MODE := "gesture"
+const INPUT_MODE := "hybrid"
 
 var _f: FileAccess
 var _t0 := 0
