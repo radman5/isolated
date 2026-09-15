@@ -99,21 +99,17 @@ func _draw_player(delta: float) -> void:
 
 	match cs.state:
 		CombatState.WINDUP:
+			# The chain path itself is drawn by the player (gameplay UI); these
+			# show the range limits it is picked from.
 			if cs.charging():
-				# Where the charged strike will go if released now, and how wide.
-				var dir: Vector3 = _p.charge_aim_dir()
-				var cyaw := atan2(-dir.x, -dir.z)
-				var lvl: float = _p.charge_level_now()
-				_swing_fan(pos, cyaw, _p.preview_arc(), _p.attack_reach, YELLOW, 0.12 + 0.35 * lvl, target)
-				_line(_flat(pos), _flat(pos) + dir.normalized() * _p.attack_reach * 1.6, WHITE)
-				if _p.cone_deg < 179.0:
-					_cone_edges(pos, _p.rotation.y, _p.cone_deg, _p.attack_reach * 1.35, GREY)
+				_circle(pos, _p.chain_first_range, Color(YELLOW, 0.35))
 			else:
 				var k: float = cs.t / maxf(cs.windup_time, 0.001)
-				_swing_fan(pos, _p.strike_yaw, _p.swing_arc(), _p.attack_reach, YELLOW, 0.08 + 0.25 * k, target)
+				_swing_fan(pos, _p.strike_yaw, _p.attack_arc, _p.attack_reach, YELLOW, 0.08 + 0.25 * k, target)
 		CombatState.ACTIVE:
-			_p_ghost = {"pos": pos, "yaw": _p.strike_yaw, "arc": _p.swing_arc(), "reach": _p.attack_reach, "age": 0.0}
-			_swing_fan(pos, _p.strike_yaw, _p.swing_arc(), _p.attack_reach, RED, 0.45, target)
+			if _p.link_i < 0:
+				_p_ghost = {"pos": pos, "yaw": _p.strike_yaw, "arc": _p.attack_arc, "reach": _p.attack_reach, "age": 0.0}
+				_swing_fan(pos, _p.strike_yaw, _p.attack_arc, _p.attack_reach, RED, 0.45, target)
 			_requested_line(pos)
 		_:
 			if _p.weapon == Stance.SWORD and ss.stance == Stance.NONE and cs.state == CombatState.IDLE:
@@ -133,7 +129,10 @@ func _draw_player(delta: float) -> void:
 	var head: String = (Stance.NAMES[_p.weapon] if ss.stance == Stance.NONE else ss.name_of()).to_upper()
 	var extra := ""
 	if cs.charging():
-		extra = "  CHARGE %.0f%%" % (_p.charge_level_now() * 100.0)
+		extra = "  links %d/%d (weapon %d · skill %d · stamina %d)" % [
+			_p.links_now(), _p.link_cap(), _p.sword_max_links, _p.skill_max_links,
+			int((cs.stamina + _p.link_cost) / _p.link_cost),
+		]
 	elif ss.stance == Stance.BOW:
 		extra = "  draw %.0f%%" % (_p.g.drag_strength() * 100.0)
 	var flags := ""
@@ -141,10 +140,10 @@ func _draw_player(delta: float) -> void:
 		flags += "  IFRAMES"
 	if ss.parry_armed():
 		flags += "  PARRY"
-	if ss.has_buffer():
-		flags += "  BUFFERED"
-	_p_label.text = "%s · %s%s\nchain %d/%d  landed %d%s\nhp %.0f  st %.0f%s" % [
-		head, cs.state_name(), _timer(cs), ss.chain, ss.chain_cap, _p.chain_hits,
+	if _p.chaining():
+		flags += "  CHAIN %d/%d" % [_p.link_i + 1, _p._chain.size()]
+	_p_label.text = "%s · %s%s\nchain landed %d%s\nhp %.0f  st %.0f%s" % [
+		head, cs.state_name(), _timer(cs), _p.chain_hits,
 		extra, cs.health, cs.stamina, flags,
 	]
 
@@ -213,13 +212,11 @@ func _on_event(kind: String, d: Dictionary) -> void:
 			if e == null or not is_instance_valid(e):
 				return
 			var txt := "-%.0f" % d.dmg
-			if d.source == "sword":
-				txt += "   hit %d/%d" % [d.chain, d.cap]
+			if d.source == "chain":
+				txt += "   link %d/%d" % [d.chain, d.cap]
 				if d.finisher:
 					txt += "  FINISHER"
-				if d.charge > 0.01:
-					txt += "\ncharge %.2f" % d.charge
-			else:
+			elif d.source == "arrow":
 				txt += "   arrow"
 			# The trade rule, made visible: a committed target does not flinch.
 			var staggered: bool = e.cs.state == CombatState.STAGGER

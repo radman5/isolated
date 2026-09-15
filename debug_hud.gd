@@ -33,15 +33,10 @@ func _process(_delta: float) -> void:
 		]
 	)
 	var ss = _p.ss
-	var g = _p.g
 	text += (
-		"\n\nstance   %-6s charge %.2f  chain %d/%d  side %s\nflick    %+4.0f deg  %5.0f px/s   near-miss %d\npeak     %5.0f px/s  (set flick_threshold from this)\ncone     %s      draw %.2f   parry %s"
+		"\n\nstance   %-6s links %d/%d  landed %d\ndraw %.2f   parry %s"
 		% [
-			ss.name_of(), _p.charge_level_now(), ss.chain, ss.chain_cap,
-			"L" if ss.side < 0 else "R",
-			_p.last_flick_deg, g.vel.length(), g.rejected,
-			g.peak,
-			"CLAMPED" if _p.cone_flash > 0.0 else "-",
+			ss.name_of(), _p.links_now(), _p.link_cap(), _p.chain_hits,
 			_p.draw_strength,
 			"ARMED" if ss.parry_armed() else ("-" if ss.parry_enabled else "off"),
 		]
@@ -58,4 +53,4 @@ func _process(_delta: float) -> void:
 				e.name, "dead" if ec.dead() else ec.state_name(), ec.t, ec.health,
 				"  PUNISH" if open and not ec.dead() else "",
 			]
-	text += "\n\nLMB click swing / hold charge + pull back aim  RMB block  Space dodge  1/2 weapon\nC = camera-blame   R = restart   Esc = free cursor   -/+ enemies   F1 debug"
+	text += "\n\nLMB click swing / hold to charge a chain, release to strike  RMB block  Space dodge  1/2 weapon\nC = camera-blame   R = restart   Esc = free cursor   -/+ enemies   F1 debug"

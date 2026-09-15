@@ -58,6 +58,7 @@ var _impact := 0.0
 var _start := 0.0
 var _phase := -1
 var _dead_played := false
+var _link_seen := -1
 var _bow_mesh: MeshInstance3D
 
 
@@ -188,6 +189,8 @@ func _drive_swing(cs, entered: bool) -> void:
 			elif _phase != 0:
 				_phase = 0
 		CombatState.ACTIVE:
+			if not is_enemy:
+				_drive_link()
 			if _phase != 1:
 				_phase = 1
 				_ap.seek(maxf(_impact - PRE, 0.0), true)
@@ -216,13 +219,29 @@ func _begin_swing(clip: String, windup: float, blend: float) -> void:
 func _pick_swing_clip(charged: bool) -> String:
 	if is_enemy:
 		return "Melee_1H_Attack_Chop"
-	if charged:
-		return "Melee_1H_Attack_Jump_Chop"
-	var ss = _actor.ss
-	# The chain alternates sides and ends on a thrust.
-	if ss.chain >= ss.chain_cap:
-		return "Melee_1H_Attack_Stab"
-	return "Melee_1H_Attack_Slice_Horizontal" if ss.chain <= 1 else "Melee_1H_Attack_Slice_Diagonal"
+	return "Melee_1H_Attack_Jump_Chop" if charged else "Melee_1H_Attack_Slice_Horizontal"
+
+
+# Each link of a chain restarts a slash from just before its impact, played so
+# the blade lands as the dash arrives. Alternates sides; the last is the overhead.
+func _drive_link() -> void:
+	var i: int = _actor.link_i
+	if i == _link_seen:
+		return
+	_link_seen = i
+	if not _actor.chaining():
+		return
+	var last: bool = i == _actor._chain.size() - 1
+	var clip := "Melee_1H_Attack_Jump_Chop" if last else (
+		"Melee_1H_Attack_Slice_Horizontal" if i % 2 == 0 else "Melee_1H_Attack_Slice_Diagonal"
+	)
+	_swing_clip = clip
+	_impact = IMPACT[clip]
+	var lead := 0.25  # seconds of the clip before impact to play during the dash
+	_play(clip, 0.03)
+	_ap.seek(maxf(_impact - lead, 0.0), true)
+	_ap.speed_scale = lead / maxf(_actor.link_dash_time + 0.02, 0.01)
+	_phase = 1
 
 
 # --- everything else ----------------------------------------------------------

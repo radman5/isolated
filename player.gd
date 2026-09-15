@@ -1,15 +1,17 @@
 extends CharacterBody3D
 # Sword input.
 #
-#   Click         a normal swing toward the cursor. It fires on press, so it adds
-#                 no latency.
-#   Hold          the swing pauses at the top of its wind-up and charges; pull
-#                 back to aim like the bow, release to send it.
-#   Click again   buffered, and chains into the next swing.
+#   Click     one arc swing toward the cursor. Fires on press, never dashes.
+#   Hold      the swing pauses at the top of its wind-up and charges. Every
+#             link_charge_time adds a link, and the path it will take through
+#             the enemies is drawn on the ground.
+#   Release   dash-strikes each target on the path in turn, invulnerable, with a
+#             whole-game hit freeze on every hit. No target in range: the swing
+#             just goes out as a plain arc.
 #
 # A click and a charge are the same swing: the only difference is whether the
 # button is still down when the wind-up would release. Both are the same committed
-# WINDUP/ACTIVE/RECOVERY the enemy uses.
+# WINDUP/ACTIVE/RECOVERY the enemy uses; the chain lives inside one held ACTIVE.
 
 const CombatState := preload("res://combat_state.gd")
 const CameraRelative := preload("res://camera_relative.gd")
@@ -29,36 +31,15 @@ signal debug_event(kind: String, data: Dictionary)
 @export var windup_time := 0.22
 @export var active_time := 0.10
 @export var recovery_time := 0.35
-## Metres covered by the dash at the start of the active window, for chain
-## follow-ups and charged strikes. A plain click does not dash; it just swings.
-## Front-loaded, so almost all of it happens in the first frames and then it stops
-## dead, which is what makes it read as sudden rather than floaty.
-@export var attack_lunge := 1.0
-## How long the dash lasts. Shorter is snappier. Capped by active_time.
-@export var lunge_time := 0.08
 @export var attack_damage := 25.0
 @export var attack_reach := 2.0
 @export var attack_arc := 55.0
 @export var hit_stagger := 0.75
-# Chained follow-ups are faster, which is how §4's "fast light follow-ups" is
-# delivered without letting a flick cancel a swing in progress.
-@export var chain_windup_time := 0.12
-@export var chain_recovery_time := 0.20
-@export var charge_damage_mult := 1.0
-@export var charge_arc_mult := 0.5
-@export var charge_stagger_mult := 0.6
-## A buffered follow-up may cut the previous swing's recovery once this much of
-## it has passed. 0 = as soon as the active frames end (juggle feel). Set it to
-## recovery_time or more to switch cancelling off and keep the buffer only.
-@export var chain_cancel_from := 0.0
-## How long a flick made mid-swing is remembered and fired as soon as it can.
-@export var buffer_window := 0.4
 
 @export_group("Knockback")
 @export var attack_knockback := 0.6  # metres, light hit
-@export var charge_knock_mult := 1.5
-## The last swing of a chain sends them flying; the light hits before it keep
-## the enemy close enough to follow up.
+## The last link of a chain sends them flying. Earlier links do not knock at all,
+## so the targets stay where the path said they were.
 @export var finisher_knock_mult := 2.5
 @export var bow_knockback := 1.0
 ## How fast a shove bleeds off. The distance is the same either way; this only
@@ -88,23 +69,28 @@ signal debug_event(kind: String, data: Dictionary)
 ## event per rendered frame by default.
 @export var raw_mouse_input := false
 
-@export_group("Sword stance")
-@export var sword_drain := 12.0
-@export var charge_time := 1.0
-@export var charged_cost := 15.0
-@export var chain_cost := 10.0
-@export var chain_window := 0.45
-@export var chain_cap := 3
-## How far either side of facing a charged strike can be aimed. 180 aims
-## anywhere, like the bow; lower it to make positioning matter more.
-@export var cone_deg := 180.0
+@export_group("Chain strike")
+## Most links the sword can chain.
+@export var sword_max_links := 5
+## Most links the skill allows. ponytail: a plain export until a skill system exists.
+@export var skill_max_links := 3
+## Stamina per link. A click is one link; a chain pays for the rest on release.
+@export var link_cost := 12.0
+## Seconds of holding per extra link.
+@export var link_charge_time := 0.35
+## The first target must be this close to the player.
+@export var chain_first_range := 6.0
+## Each next target must be this close to the previous one.
+@export var chain_hop_range := 4.5
+## Seconds to dash to each target.
+@export var link_dash_time := 0.07
+## Where the dash stops, in metres short of the target's centre.
+@export var link_standoff := 1.1
+## Whole-game freeze on each link, and on the last one.
+@export var hitstop_time := 0.05
+@export var hitstop_last := 0.10
 ## Move speed while holding a charge, as a fraction of move_speed.
 @export var charge_move_mult := 0.35
-## Pull-back shorter than this (screen px) aims straight ahead, so an accidental
-## wobble while holding does not swing sideways.
-@export var charge_aim_deadzone := 25.0
-## Extra lunge distance at full charge, as a multiple of attack_lunge.
-@export var charge_lunge_mult := 1.0
 
 @export_group("Bow")
 @export var bow_drain := 8.0
@@ -129,10 +115,8 @@ const CS_TUNABLES := [
 	"iframe_end", "dodge_cost", "stamina_max", "regen_rate", "regen_delay", "health_max",
 ]
 const SS_TUNABLES := [
-	"sword_drain", "bow_drain", "block_drain", "charge_time", "charged_cost",
-	"chain_cost", "chain_window", "chain_cap", "cone_deg", "bow_cost",
-	"block_hit_cost", "block_chip", "parry_cost", "parry_window", "parry_enabled",
-	"stance_break_time", "buffer_window",
+	"bow_drain", "block_drain", "bow_cost", "block_hit_cost", "block_chip",
+	"parry_cost", "parry_window", "parry_enabled", "stance_break_time",
 ]
 
 var cs := CombatState.new()
@@ -141,25 +125,27 @@ var g := Gesture.new()
 var ss := Stance.new()
 
 var weapon := Stance.SWORD  # which weapon LMB draws
-var cone_flash := 0.0  # latched so a one-frame clamp is actually visible
 var last_flick_deg := 0.0
 var draw_strength := 0.0
 
 var dodge_dir := Vector3.FORWARD  # read by character_view to pick the dodge animation
-var strike_yaw := 0.0  # cone-clamped direction of the current swing
-var chain_hits := 0  # hits landed in the current chain
-var _swing_level := 0.0
-var _swing_dashes := false  # chain follow-ups and charged strikes dash; a plain click does not
+var strike_yaw := 0.0  # direction of the current swing
+var chain_hits := 0  # links landed by the current chain
+# Index of the link being dashed to; -1 for a plain swing. Read by character_view
+# to restart the slash on each link.
+var link_i := -1
+var _chain: Array = []  # enemies to visit, in order; non-empty only while it plays
+var _link_t := 0.0
+var _chain_vel := Vector3.ZERO
+var _hitstop_until := 0  # msec
+var _preview := ImmediateMesh.new()
 var _hit_this_swing := {}  # instance ids already hit by the swing in progress
 var _knock := Vector3.ZERO
-var _hold_spent := false  # set when a charge auto-releases, until the button is let go
 # Each press gets an id, and a swing remembers the press that started it. Only
-# that press can hold it into a charge. Without this, clicking again to chain
-# during a wind-up would make the CURRENT swing charge instead of queuing the
-# next one.
+# that press can hold it into a charge, so a stray click during a swing that is
+# then held does not turn the current swing into a charge.
 var _press_id := 0
 var _swing_press := -1
-var _buffered_press := -1
 var _was_active := false
 var _reject_cool := 0.0
 
@@ -175,6 +161,31 @@ func _ready() -> void:
 	# Without an escape you cannot get the cursor back to quit.
 	if raw_mouse_input:
 		Input.use_accumulated_input = false
+	var mi := MeshInstance3D.new()
+	mi.mesh = _preview
+	mi.top_level = true
+	mi.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.vertex_color_use_as_albedo = true
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.no_depth_test = true
+	mi.material_override = m
+	add_child(mi)
+
+
+# A scene reload mid-freeze would otherwise leave the whole game stopped.
+func _exit_tree() -> void:
+	Engine.time_scale = 1.0
+
+
+func _process(_delta: float) -> void:
+	# _process still runs while time_scale is 0, which is what lets it end.
+	if Engine.time_scale == 0.0 and Time.get_ticks_msec() >= _hitstop_until:
+		Engine.time_scale = 1.0
+	_chain_preview()
 
 
 # Flicks are handled here rather than in _physics_process so the swing starts on
@@ -212,21 +223,15 @@ func _physics_process(delta: float) -> void:
 	g.flick_threshold = flick_threshold
 	g.refractory = flick_refractory
 	g.drag_max_px = drag_max_px
-	# Swings after the first in a chain are quicker.
-	if ss.chain > 1:
-		cs.windup_time = chain_windup_time
-		cs.recovery_time = chain_recovery_time
 
 	g.tick(delta)
-	cone_flash = maxf(0.0, cone_flash - delta)
 	_reject_cool = maxf(0.0, _reject_cool - delta)
 	_stance_edges()
 	cs.hold = (
 		weapon == Stance.SWORD and ss.stance == Stance.NONE
-		and Input.is_action_pressed("attack") and not _hold_spent
-		and _swing_press == _press_id
+		and Input.is_action_pressed("attack") and _swing_press == _press_id
 	)
-	ss.tick(delta, cs.state)
+	ss.tick(delta)
 	draw_strength = g.drag_strength() if ss.stance == Stance.BOW else 0.0
 
 	var cam := get_viewport().get_camera_3d()
@@ -237,8 +242,7 @@ func _physics_process(delta: float) -> void:
 			cam.global_transform.basis
 		)
 
-	var drain := ss.drain() + (sword_drain if cs.charging() else 0.0)
-	var ev := cs.advance(delta, false, Input.is_action_just_pressed("dodge"), drain)
+	var ev := cs.advance(delta, false, Input.is_action_just_pressed("dodge"), ss.drain())
 	if ev == "dodge":
 		# §7: dodge beats everything. It is the input most needed under pressure.
 		_exit_stance("dodge")
@@ -249,16 +253,9 @@ func _physics_process(delta: float) -> void:
 	# A stance cannot survive being staggered.
 	if cs.state == CombatState.STAGGER and ss.stance != Stance.NONE:
 		_exit_stance("stagger")
-	# Holding past empty stamina sends the charge rather than hanging forever.
-	if cs.charging() and cs.stamina <= 0.0:
-		_release_charge()
-		_hold_spent = true
-		cs.hold = false
-	if weapon == Stance.SWORD and ss.stance == Stance.NONE and ss.has_buffer() and _can_swing_now():
-		ss.take_buffer()
-		_start_swing(_buffered_press)
 
 	_aim(delta, cam)
+	_run_chain(delta)
 	_apply_hit()
 	_bow_visuals(cam)
 	_move(delta, wish)
@@ -282,25 +279,14 @@ func _stance_edges() -> void:
 
 func _sword_edges() -> void:
 	if Input.is_action_just_pressed("attack") and ss.stance == Stance.NONE:
-		_hold_spent = false
 		_press_id += 1
-		g.press()  # start collecting pull-back, in case this becomes a charge
-		if _can_swing_now():
+		# No buffer and no combo: a click during a swing is simply ignored.
+		if cs.state == CombatState.IDLE:
 			_start_swing(_press_id)
-		else:
-			_buffered_press = _press_id
-			# Tekken-style buffer: a click made while a swing is still coming out
-			# is kept and fires on the first frame it legally can. A click has no
-			# direction, so any non-zero vector marks it.
-			ss.buffer_flick(Vector2.ONE)
-			Metrics.log_event("click_buffered", {"state": cs.state_name()})
 	elif Input.is_action_just_released("attack"):
 		# cs.hold is still last frame's value here, so charging() is accurate.
 		if cs.charging():
 			_release_charge()
-		if ss.stance == Stance.NONE:
-			g.release()
-		_hold_spent = false
 
 
 func _enter_stance(s: int) -> void:
@@ -320,7 +306,7 @@ func _exit_stance(why: String) -> void:
 		return
 	Metrics.log_event(
 		"stance_exited",
-		{"stance": ss.name_of(), "why": why, "chain": ss.chain, "rejected": g.rejected}
+		{"stance": ss.name_of(), "why": why, "rejected": g.rejected}
 	)
 	ss.exit()
 	g.release()
@@ -328,96 +314,143 @@ func _exit_stance(why: String) -> void:
 
 
 func _start_swing(press: int) -> void:
-	if not ss.can_chain():
-		Metrics.log_event("chain_capped", {"n": ss.chain})
-		return
-	var cost := ss.swing_cost()
-	var from_state := cs.state
-	# A follow-up may cancel the previous swing's recovery. An opener may not.
-	var cancel_from := chain_cancel_from if ss.chain > 0 else INF
-	if not cs.try_chain_attack(cost, cancel_from):
+	if not cs.try_attack(link_cost):
 		Metrics.log_event("attack_refused", {"stamina": snappedf(cs.stamina, 0.1)})
 		return
-
 	# A click strikes exactly at the cursor, so snap to it rather than waiting on
-	# the rotation clamp to catch up. Facing then locks for the wind-up; a held
-	# swing is re-aimed when it is released.
+	# the rotation clamp to catch up. Facing then locks for the wind-up.
+	_face_cursor()
+	_swing_press = press
+	link_i = -1
+	debug_event.emit("swing", {
+		"clamped": false, "requested_yaw": strike_yaw, "requested_deg": 0.0, "cancelled": false,
+	})
+	Metrics.log_event("swing_fired", {"cost": link_cost})
+
+
+func _face_cursor() -> void:
 	var yaw = _cursor_yaw(get_viewport().get_camera_3d())
 	if yaw != null:
 		rotation.y = yaw
 	strike_yaw = rotation.y
-	_swing_level = 0.0
-	_swing_press = press
 
-	var cancelled := from_state == CombatState.RECOVERY
-	debug_event.emit("swing", {
-		"clamped": false, "requested_yaw": strike_yaw, "requested_deg": 0.0, "cancelled": cancelled,
-	})
-	if ss.chain == 0:
-		chain_hits = 0
-	ss.on_swing()
-	_swing_dashes = ss.chain > 1
-	Metrics.log_event(
-		"swing_fired", {"chain": ss.chain, "side": ss.side, "cost": cost, "cancelled": cancelled}
+
+# Links a release would chain right now. The first link was paid when the swing
+# started, so it is added back before asking what stamina can afford.
+func links_now() -> int:
+	return Stance.link_count(
+		cs.charge_seconds(), link_charge_time, sword_max_links, skill_max_links,
+		cs.stamina + link_cost, link_cost
 	)
-	if ss.chain > 1:
-		Metrics.log_event("chain_extended", {"n": ss.chain})
 
 
-# Sends a held swing: charge from how long it was held, aim from the pull-back.
+func link_cap() -> int:
+	return mini(mini(sword_max_links, skill_max_links), int((cs.stamina + link_cost) / link_cost))
+
+
+# Enemies the chain would visit if released now, in order.
+func chain_targets(links: int) -> Array:
+	var foes := enemies()
+	var cursor = _cursor_point(get_viewport().get_camera_3d())
+	if cursor == null:
+		cursor = global_position - global_transform.basis.z * 2.0
+	var at := foes.map(func(e): return e.global_position)
+	return Stance.chain_path(cursor, global_position, at, links, chain_first_range, chain_hop_range).map(
+		func(i): return foes[i]
+	)
+
+
+func chaining() -> bool:
+	return not _chain.is_empty()
+
+
+# Sends a held swing. With a target in range it becomes a chain; otherwise it
+# goes out as a plain arc at the cursor.
 func _release_charge() -> void:
-	_swing_level = charge_level_now()
-	var dir := charge_aim_dir()
-	var want := atan2(-dir.x, -dir.z)
-	strike_yaw = Stance.clamp_cone(rotation.y, want, cone_deg)
-	if absf(wrapf(want - strike_yaw, -PI, PI)) > 0.01:
-		cone_flash = 0.5
-		Metrics.log_event("cone_clamped", {
-			"requested_deg": snappedf(rad_to_deg(wrapf(want - rotation.y, -PI, PI)), 1.0),
-			"applied_deg": snappedf(cone_deg, 1.0),
-		})
-	# Unlike a click, a charged strike turns you: it goes where you aimed it.
-	rotation.y = strike_yaw
 	cs.hold = false
-	_swing_dashes = true
-	Metrics.log_event("charge_released", {
-		"charge": snappedf(_swing_level, 0.01),
-		"aimed": g.drag.length() >= charge_aim_deadzone,
-		"deg": snappedf(rad_to_deg(strike_yaw), 1.0),
+	var links := links_now()
+	var path := chain_targets(links)
+	Metrics.log_event("chain_released", {
+		"links": links, "cap": link_cap(), "targets": path.size(), "stamina": snappedf(cs.stamina, 0.1),
 	})
+	if path.is_empty():
+		_face_cursor()
+		return
+	cs.stamina = maxf(0.0, cs.stamina - link_cost * (path.size() - 1))
+	_chain = path
+	link_i = 0
+	_link_t = 0.0
+	chain_hits = 0
+	_knock = Vector3.ZERO
+	cs.hold_active = true
+	# Dash through bodies: a chain through a line of enemies would otherwise stop
+	# at the first capsule in the way.
+	for e in enemies():
+		add_collision_exception_with(e)
 
 
-func lunge_distance() -> float:
-	if not _swing_dashes:
-		return 0.0
-	return attack_lunge * (1.0 + charge_lunge_mult * _swing_level)
+# Dashes to the current link's target and strikes it on arrival. Targets are
+# followed live, so one that was knocked or walked is still reached.
+func _run_chain(delta: float) -> void:
+	_chain_vel = Vector3.ZERO
+	if not chaining():
+		return
+	var e = _chain[link_i]
+	if not is_instance_valid(e) or e.cs.dead():
+		_next_link()
+		return
+	var to: Vector3 = e.global_position - global_position
+	to.y = 0.0
+	rotation.y = atan2(-to.x, -to.z)
+	strike_yaw = rotation.y
+	var gap := to.length() - link_standoff
+	# Arrived, or blocked by a wall: give up after the dash time plus a little and
+	# strike only if it is actually in reach.
+	if gap <= 0.05 or _link_t > link_dash_time + 0.1:
+		if to.length() <= attack_reach + 0.1:
+			_land_link(e, to.normalized())
+		_next_link()
+		return
+	_chain_vel = to.normalized() * gap / maxf(link_dash_time - _link_t, delta)
+	_link_t += delta
 
 
-func charge_level_now() -> float:
-	return clampf(cs.charge_seconds() / maxf(charge_time, 0.001), 0.0, 1.0)
+func _land_link(e: Node, dir: Vector3) -> void:
+	var last := link_i == _chain.size() - 1
+	var push := dir * attack_knockback * finisher_knock_mult if last else Vector3.ZERO
+	e.take_hit(attack_damage, hit_stagger, push)
+	chain_hits += 1
+	debug_event.emit("dealt", {
+		"dmg": attack_damage, "stagger": hit_stagger, "charge": 0.0,
+		"chain": link_i + 1, "cap": _chain.size(), "source": "chain",
+		"target": e, "knock": push.length(), "finisher": last,
+	})
+	Metrics.log_event("chain_link_hit", {"i": link_i + 1, "id": e.name, "enemy_hp": snappedf(e.cs.health, 0.1)})
+	_hitstop(hitstop_last if last else hitstop_time)
 
 
-# Opposite the pull-back, like the bow. Inside the deadzone it strikes ahead.
-func charge_aim_dir() -> Vector3:
-	if g.drag.length() >= charge_aim_deadzone:
-		var cam := get_viewport().get_camera_3d()
-		if cam:
-			var world := CameraRelative.project(-g.drag, cam.global_transform.basis)
-			if world != Vector3.ZERO:
-				return world
-	return -global_transform.basis.z
+func _next_link() -> void:
+	link_i += 1
+	_link_t = 0.0
+	if link_i >= _chain.size():
+		_chain.clear()
+		cs.hold_active = false
+		for e in get_collision_exceptions():
+			remove_collision_exception_with(e)
+
+
+# Freezes the whole game. A second freeze extends the first rather than stacking.
+func _hitstop(secs: float) -> void:
+	if secs <= 0.0:
+		return
+	_hitstop_until = maxi(_hitstop_until, Time.get_ticks_msec() + int(secs * 1000.0))
+	Engine.time_scale = 0.0
 
 
 # Alive enemies. Queried every time rather than cached, because fight.gd spawns
 # them after this node is ready and the count changes between fights.
 func enemies() -> Array:
 	return get_tree().get_nodes_in_group("enemies").filter(func(e): return not e.cs.dead())
-
-
-func _can_swing_now() -> bool:
-	if cs.state == CombatState.IDLE:
-		return true
-	return ss.chain > 0 and cs.state == CombatState.RECOVERY and cs.t >= chain_cancel_from
 
 
 func strike_dir() -> Vector3:
@@ -481,20 +514,12 @@ func bow_length(strength: float) -> float:
 	return bow_range * maxf(strength, 0.05)
 
 
-# The arc of the swing in progress. The hit test and debug_draw both read this,
-# so the drawn fan cannot drift from what actually connects.
-func swing_arc() -> float:
-	return attack_arc * (1.0 + charge_arc_mult * _swing_level)
-
-
-# The arc the NEXT swing would get if you flicked now.
-func preview_arc() -> float:
-	return attack_arc * (1.0 + charge_arc_mult * charge_level_now())
-
-
 # The damage path for everything that hits the player. Block has to intercept
 # before take_damage, so enemy.gd calls this rather than cs.take_damage directly.
 func receive_hit(amount: float) -> String:
+	if chaining():
+		debug_event.emit("taken", {"result": "dodged", "amount": amount, "lost": 0.0})
+		return "dodged"
 	var was_blocking := ss.stance == Stance.BLOCK
 	var hp_before := cs.health
 	var r := ss.resolve_hit(cs, amount)
@@ -514,16 +539,21 @@ func _aim(delta: float, cam: Camera3D) -> void:
 		rotation.y = rotate_toward(rotation.y, yaw, deg_to_rad(rate) * delta)
 
 
-# Yaw from the player to the point under the cursor, or null if there is none.
-func _cursor_yaw(cam: Camera3D) -> Variant:
+# The ground point under the cursor, or null if there is none.
+func _cursor_point(cam: Camera3D) -> Variant:
 	if cam == null:
 		return null
 	var m := get_viewport().get_mouse_position()
 	# Plane.intersects_ray returns Vector3 OR null - both the untyped var and
 	# the null check are load-bearing.
-	var hit = Plane(Vector3.UP, global_position.y).intersects_ray(
+	return Plane(Vector3.UP, global_position.y).intersects_ray(
 		cam.project_ray_origin(m), cam.project_ray_normal(m)
 	)
+
+
+# Yaw from the player to the point under the cursor, or null if there is none.
+func _cursor_yaw(cam: Camera3D) -> Variant:
+	var hit = _cursor_point(cam)
 	if hit == null:
 		return null
 	var to_aim: Vector3 = hit - global_position
@@ -533,42 +563,80 @@ func _cursor_yaw(cam: Camera3D) -> Variant:
 	return atan2(-to_aim.x, -to_aim.z)
 
 
+# A plain swing connects with every enemy inside its arc, each at most once. A
+# chain strikes its targets one at a time in _land_link instead.
 func _apply_hit() -> void:
 	var active_now := cs.state == CombatState.ACTIVE
 	if active_now and not _was_active:
 		_hit_this_swing.clear()
 	_was_active = active_now
-	if not active_now:
+	if not active_now or link_i >= 0:
 		return
-	# The strike direction is the cone-clamped yaw, not the body's facing. A swing
-	# connects with every enemy inside its arc, each at most once.
-	var finisher := ss.chain >= ss.chain_cap
 	for e in enemies():
 		var id: int = e.get_instance_id()
 		if _hit_this_swing.has(id):
 			continue
-		if not CombatState.in_arc(global_position, strike_dir(), e.global_position, attack_reach, swing_arc()):
+		if not CombatState.in_arc(global_position, strike_dir(), e.global_position, attack_reach, attack_arc):
 			continue
 		_hit_this_swing[id] = true
-		chain_hits += 1
-		var dmg := attack_damage * (1.0 + charge_damage_mult * _swing_level)
-		var stag := hit_stagger * (1.0 + charge_stagger_mult * _swing_level)
-		var knock := attack_knockback * (1.0 + charge_knock_mult * _swing_level)
-		if finisher:
-			knock *= finisher_knock_mult
-		# Pushed straight away from you, so one sweep through a crowd spreads it.
 		var push: Vector3 = e.global_position - global_position
 		push.y = 0.0
-		e.take_hit(dmg, stag, push.normalized() * knock)
+		e.take_hit(attack_damage, hit_stagger, push.normalized() * attack_knockback)
 		debug_event.emit("dealt", {
-			"dmg": dmg, "stagger": stag, "charge": _swing_level,
-			"chain": ss.chain, "cap": ss.chain_cap, "source": "sword",
-			"target": e, "knock": knock, "finisher": finisher,
+			"dmg": attack_damage, "stagger": hit_stagger, "charge": 0.0,
+			"chain": 0, "cap": 0, "source": "sword",
+			"target": e, "knock": attack_knockback, "finisher": false,
 		})
-		Metrics.log_event("enemy_hit", {
-			"id": e.name, "enemy_hp": snappedf(e.cs.health, 0.1),
-			"charge": snappedf(_swing_level, 0.01), "chain": ss.chain,
-		})
+		Metrics.log_event("enemy_hit", {"id": e.name, "enemy_hp": snappedf(e.cs.health, 0.1)})
+
+
+# While charging: the path a release would take. Bright rings are locked-in
+# links; the faint one is the enemy another link_charge_time would add. Gameplay
+# UI, so it is not behind the F1 debug toggle.
+func _chain_preview() -> void:
+	_preview.clear_surfaces()
+	if not cs.charging():
+		return
+	var links := links_now()
+	var path := chain_targets(links + 1 if links < link_cap() else links)
+	if path.is_empty():
+		return
+	_preview.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	var from := _ground(self)
+	for i in path.size():
+		var at := _ground(path[i])
+		var locked := i < links
+		var col := Color(1.0, 0.85, 0.2, 0.9) if locked else Color(1, 1, 1, 0.3)
+		_ribbon(from, at, 0.06 if locked else 0.03, col)
+		_ring(at, 0.55, 0.07, col)
+		from = at
+	_preview.surface_end()
+
+
+func _ground(n: Node3D) -> Vector3:
+	var p := n.get_global_transform_interpolated().origin
+	return Vector3(p.x, 0.05, p.z)
+
+
+func _ribbon(a: Vector3, b: Vector3, w: float, col: Color) -> void:
+	var side := (b - a).cross(Vector3.UP).normalized() * w
+	for v in [a - side, a + side, b + side, a - side, b + side, b - side]:
+		_preview.surface_set_color(col)
+		_preview.surface_add_vertex(v)
+
+
+func _ring(c: Vector3, r: float, w: float, col: Color) -> void:
+	const SEGS := 24
+	for k in SEGS:
+		var a0 := TAU * k / SEGS
+		var a1 := TAU * (k + 1) / SEGS
+		var i0 := c + Vector3(cos(a0), 0, sin(a0)) * (r - w)
+		var o0 := c + Vector3(cos(a0), 0, sin(a0)) * (r + w)
+		var i1 := c + Vector3(cos(a1), 0, sin(a1)) * (r - w)
+		var o1 := c + Vector3(cos(a1), 0, sin(a1)) * (r + w)
+		for v in [i0, o0, o1, i0, o1, i1]:
+			_preview.surface_set_color(col)
+			_preview.surface_add_vertex(v)
 
 
 func _bow_visuals(cam: Camera3D) -> void:
@@ -593,14 +661,8 @@ func _move(delta: float, wish: Vector3) -> void:
 		CombatState.DODGE:
 			target = dodge_dir * (dodge_distance / maxf(dodge_time, 0.01))
 		CombatState.ACTIVE:
-			# Front-loaded dash along the strike direction. Speed falls off as
-			# (1-x)^2, which covers attack_lunge metres in lunge_time and then stops
-			# dead. Sampled at the frame midpoint, or the ~5-frame sum overshoots by
-			# about a third.
-			var lt := minf(lunge_time, active_time)
-			if cs.t < lt and lunge_distance() > 0.0:
-				var k := 1.0 - minf((cs.t + delta * 0.5) / maxf(lt, 0.001), 1.0)
-				target = strike_dir() * (3.0 * lunge_distance() / maxf(lt, 0.001)) * k * k
+			# Only a chain moves you; a plain swing stands still.
+			target = _chain_vel
 		CombatState.WINDUP:
 			if cs.charging():
 				target = wish * move_speed * charge_move_mult

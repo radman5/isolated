@@ -27,16 +27,15 @@ func _initialize() -> void:
 	_stagger()
 	_gesture_held_gate()
 	_gesture_crossing()
-	_cone_clamp()
 	_rotation_rates()
-	_chain()
+	_link_count()
+	_chain_path()
 	_bow_drag()
 	_no_regen_while_stanced()
 	_block()
 	_parry_flag()
-	_chain_cancel()
-	_input_buffer()
 	_held_charge()
+	_hold_active()
 	print("OK")
 	quit()
 
@@ -295,7 +294,7 @@ func _gesture_crossing() -> void:
 
 	# Flick, stop the mouse dead, flick again. A still mouse sends no events, so
 	# nothing can bring the speed back under the threshold - only the idle reset
-	# can. Without it the second flick is eaten and chaining is impossible.
+	# can. Without it the second flick is eaten.
 	g = Gesture.new()
 	g.press()
 	g.tick(DT)
@@ -317,25 +316,6 @@ func _gesture_crossing() -> void:
 	assert(g.sample(STEP, FAST) != Vector2.ZERO, "never re-armed after the refractory window")
 
 
-# 11. §11-3: the cone clamps and never rotates the player.
-func _cone_clamp() -> void:
-	assert(is_equal_approx(Stance.clamp_cone(0.0, deg_to_rad(120), 60.0), deg_to_rad(60)),
-		"+120 did not clamp to +60")
-	assert(is_equal_approx(Stance.clamp_cone(0.0, deg_to_rad(-120), 60.0), deg_to_rad(-60)),
-		"-120 did not clamp to -60")
-	assert(is_equal_approx(Stance.clamp_cone(0.0, deg_to_rad(30), 60.0), deg_to_rad(30)),
-		"an in-cone flick was altered")
-	# The wrap case: facing +170, flick -170. True delta is +20, well inside.
-	var got: float = Stance.clamp_cone(deg_to_rad(170), deg_to_rad(-170), 60.0)
-	assert(is_equal_approx(wrapf(got - deg_to_rad(170), -PI, PI), deg_to_rad(20)),
-		"wrap-around clamped a 20 deg flick: %f deg" % rad_to_deg(got - deg_to_rad(170))
-	)
-	# Directly behind clamps to an edge rather than failing.
-	var back: float = Stance.clamp_cone(0.0, PI, 60.0)
-	assert(absf(absf(wrapf(back, -PI, PI)) - deg_to_rad(60)) < 0.001,
-		"a flick straight backwards did not clamp to a cone edge")
-
-
 # 12. §11-4: rotation clamp differs per state, and the bow locks facing.
 func _rotation_rates() -> void:
 	assert(Stance.rot_rate(Stance.NONE, CombatState.IDLE) == 720.0)
@@ -348,51 +328,6 @@ func _rotation_rates() -> void:
 	assert(Stance.move_mult(Stance.SWORD) == 0.5)
 	assert(Stance.move_mult(Stance.BLOCK) == 0.4)
 	assert(Stance.move_mult(Stance.BOW) == 0.35)
-
-
-func _run_swing(cs, ss) -> void:
-	while cs.state != CombatState.IDLE:
-		cs.advance(DT, false, false, ss.drain())
-		ss.tick(DT, cs.state)
-
-
-# 13. §11-5: chain caps at 3 and alternates side automatically.
-func _chain() -> void:
-	var cs = _fresh()
-	var ss = Stance.new()
-	ss.enter(Stance.SWORD)
-	var sides := []
-	var costs := []
-	for i in 3:
-		assert(ss.can_chain(), "could not chain at swing %d" % (i + 1))
-		var before: float = cs.stamina
-		costs.append(ss.swing_cost())
-		assert(cs.try_attack(ss.swing_cost()), "swing %d refused" % (i + 1))
-		ss.on_swing()
-		sides.append(ss.side)
-		_run_swing(cs, ss)
-		cs.stamina = before  # isolate chaining from the stamina economy here
-	assert(ss.chain == 3, "chain counted %d" % ss.chain)
-	assert(not ss.can_chain(), "chain did not cap at 3")
-	assert(sides == [1, -1, 1], "side did not alternate: %s" % [sides])
-	assert(costs[0] == ss.charged_cost, "first swing was not the charged cost")
-	assert(costs[1] == ss.chain_cost and costs[2] == ss.chain_cost, "follow-ups were not light")
-
-	# Letting the window lapse resets the chain.
-	ss = Stance.new()
-	ss.enter(Stance.SWORD)
-	ss.on_swing()
-	assert(ss.chain == 1)
-	for i in int((ss.chain_window + 0.1) / DT):
-		ss.tick(DT, CombatState.IDLE)
-	assert(ss.chain == 0, "chain did not reset after the window lapsed")
-
-	# Insufficient stamina ends the chain (§4).
-	cs = _fresh()
-	ss = Stance.new()
-	ss.enter(Stance.SWORD)
-	cs.stamina = ss.chain_cost - 1.0
-	assert(not cs.try_attack(ss.swing_cost()), "swung without the stamina for it")
 
 
 # 14. §11-6: bow fires opposite the drag, strength proportional to distance.
@@ -508,7 +443,7 @@ func _parry_flag() -> void:
 	ss.enter(Stance.BLOCK)
 	ss.try_parry(cs)
 	for i in int((ss.parry_window + 0.1) / DT):
-		ss.tick(DT, CombatState.IDLE)
+		ss.tick(DT)
 	assert(not ss.parry_armed(), "the parry window never expired")
 	assert(ss.resolve_hit(cs, 100.0) == "blocked", "a lapsed parry still negated the hit")
 	assert(cs.stamina < cs.stamina_max - ss.parry_cost, "a failed parry was refunded anyway")
@@ -520,70 +455,6 @@ func _advance_until(cs, state: int) -> void:
 			return
 		cs.advance(DT, false, false)
 	assert(false, "never reached state %d" % state)
-
-
-# 18. Chain cancel: a follow-up may cut the previous swing's RECOVERY, but never
-#     its WINDUP or ACTIVE, and only once cancel_from has passed.
-func _chain_cancel() -> void:
-	var cs = _fresh()
-	assert(cs.try_attack(15.0))
-	assert(not cs.try_chain_attack(10.0, 0.0), "cancelled a wind-up")
-	_advance_until(cs, CombatState.ACTIVE)
-	assert(not cs.try_chain_attack(10.0, 0.0), "cancelled an active swing")
-	_advance_until(cs, CombatState.RECOVERY)
-	var before: float = cs.stamina
-	assert(cs.try_chain_attack(10.0, 0.0), "could not cancel recovery into a follow-up")
-	assert(cs.state == CombatState.WINDUP and cs.t == 0.0, "cancel did not start a fresh wind-up")
-	assert(is_equal_approx(cs.stamina, before - 10.0), "the cancelled follow-up was not paid for")
-
-	# A later cancel point is respected.
-	cs = _fresh()
-	cs.try_attack(15.0)
-	_advance_until(cs, CombatState.RECOVERY)
-	assert(not cs.try_chain_attack(10.0, 0.2), "cancelled before cancel_from")
-	while cs.state == CombatState.RECOVERY and cs.t < 0.2:
-		cs.advance(DT, false, false)
-	assert(cs.try_chain_attack(10.0, 0.2), "could not cancel after cancel_from")
-
-	# INF means no cancel at all, but IDLE still works.
-	cs = _fresh()
-	cs.try_attack(15.0)
-	_advance_until(cs, CombatState.RECOVERY)
-	assert(not cs.try_chain_attack(10.0, INF), "INF still allowed a cancel")
-	_advance_until(cs, CombatState.IDLE)
-	assert(cs.try_chain_attack(10.0, INF), "a chain swing from IDLE was refused")
-
-	# Cannot cancel into anything with no stamina for it.
-	cs = _fresh()
-	cs.try_attack(15.0)
-	_advance_until(cs, CombatState.RECOVERY)
-	cs.stamina = 5.0
-	assert(not cs.try_chain_attack(10.0, 0.0), "cancelled without the stamina to pay")
-	assert(cs.state == CombatState.RECOVERY, "a refused cancel still left recovery")
-
-
-# 19. Input buffer: latest flick wins, it expires, and leaving the stance drops it.
-func _input_buffer() -> void:
-	var ss = Stance.new()
-	ss.enter(Stance.SWORD)
-	assert(not ss.has_buffer())
-	ss.buffer_flick(Vector2(1, 0))
-	ss.buffer_flick(Vector2(0, -1))
-	assert(ss.has_buffer(), "a buffered flick was lost")
-	assert(ss.take_buffer() == Vector2(0, -1), "the buffer did not keep the latest flick")
-	assert(not ss.has_buffer(), "take_buffer did not consume")
-
-	ss.buffer_flick(Vector2(1, 0))
-	for i in int((ss.buffer_window - 0.05) / DT):
-		ss.tick(DT, CombatState.WINDUP)
-	assert(ss.has_buffer(), "the buffer expired early")
-	for i in 10:
-		ss.tick(DT, CombatState.WINDUP)
-	assert(not ss.has_buffer(), "a stale flick outlived buffer_window")
-
-	ss.buffer_flick(Vector2(1, 0))
-	ss.exit()
-	assert(not ss.has_buffer(), "a buffered swing survived leaving the stance")
 
 
 # 20. Hybrid sword: a held wind-up pauses at the top and charges; releasing sends
@@ -634,3 +505,62 @@ func _held_charge() -> void:
 		cs.advance(DT, false, false)
 	cs.stagger(0.3)
 	assert(cs.state == CombatState.STAGGER, "a held charge was not interruptible")
+
+
+# 21. Link count: one link free, one more per link_time held, capped by the lowest
+#     of weapon, skill and what stamina can pay for.
+func _link_count() -> void:
+	assert(Stance.link_count(0.0, 0.35, 5, 5, 100.0, 12.0) == 1, "zero charge was not one link")
+	assert(Stance.link_count(0.34, 0.35, 5, 5, 100.0, 12.0) == 1, "grew a link early")
+	assert(Stance.link_count(0.36, 0.35, 5, 5, 100.0, 12.0) == 2, "did not grow at link_time")
+	assert(Stance.link_count(0.71, 0.35, 5, 5, 100.0, 12.0) == 3)
+	assert(Stance.link_count(9.0, 0.35, 4, 5, 100.0, 12.0) == 4, "weapon cap did not bind")
+	assert(Stance.link_count(9.0, 0.35, 5, 3, 100.0, 12.0) == 3, "skill cap did not bind")
+	assert(Stance.link_count(9.0, 0.35, 5, 5, 25.0, 12.0) == 2, "stamina cap did not bind")
+	# Broke: still one link, since the first was already paid when the swing began.
+	assert(Stance.link_count(9.0, 0.35, 5, 5, 0.0, 12.0) == 1, "no stamina gave zero links")
+
+
+# 22. Chain path: first target nearest the CURSOR within first_range of the player,
+#     then nearest-next within hop_range, no revisits, stops when nothing is near.
+func _chain_path() -> void:
+	var o := Vector3.ZERO
+	var at := [Vector3(2, 0, 0), Vector3(-2, 0, 0), Vector3(-4, 0, 0), Vector3(-20, 0, 0)]
+	# Cursor to the left: picks -2 although +2 is just as close to the player.
+	var p: Array = Stance.chain_path(Vector3(-3, 0, 0), o, at, 5, 6.0, 4.5)
+	assert(p[0] == 1, "first target was not the one nearest the cursor: %s" % [p])
+	assert(p == [1, 2], "hop order wrong, revisited, or hopped 6m past hop_range: %s" % [p])
+	# Link count is respected.
+	assert(Stance.chain_path(Vector3(-3, 0, 0), o, at, 2, 6.0, 4.5) == [1, 2], "ignored the link count")
+	# First range: a far enemy under the cursor is not a valid opener.
+	p = Stance.chain_path(Vector3(-20, 0, 0), o, at, 1, 6.0, 4.5)
+	assert(p == [2], "opener ignored first_range: %s" % [p])
+	# Nothing in first range: empty.
+	assert(Stance.chain_path(o, o, [Vector3(10, 0, 0)], 3, 6.0, 4.5).is_empty(), "picked an out-of-range opener")
+	# Stops when the next hop is too far.
+	assert(Stance.chain_path(o, o, [Vector3(1, 0, 0), Vector3(9, 0, 0)], 3, 6.0, 4.5) == [0], "hopped past hop_range")
+	# Height is ignored.
+	assert(Stance.chain_path(o, o, [Vector3(1, 5, 0)], 1, 2.0, 4.5) == [0], "height broke the range check")
+
+
+# 23. A held ACTIVE stays open for the whole chain, then ends normally.
+func _hold_active() -> void:
+	var cs = _fresh()
+	assert(cs.try_attack(10.0))
+	_advance_until(cs, CombatState.ACTIVE)
+	cs.hold_active = true
+	for i in 60:
+		cs.advance(DT, false, false)
+	assert(cs.state == CombatState.ACTIVE, "ACTIVE ended while held")
+	cs.hold_active = false
+	cs.advance(DT, false, false)
+	assert(cs.state == CombatState.RECOVERY, "releasing hold_active did not end ACTIVE")
+
+	# Charging pauses regen, so waiting at the top cannot refill the link cap.
+	cs = _fresh()
+	cs.hold = true
+	cs.try_attack(10.0)
+	cs.stamina = 40.0
+	for i in 120:
+		cs.advance(DT, false, false)
+	assert(cs.charging() and cs.stamina == 40.0, "stamina regenerated while charging")

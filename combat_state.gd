@@ -37,6 +37,9 @@ var stagger_time := 0.0
 # at the top and charges. Letting go sends it. Defaults off, so the enemy is
 # untouched.
 var hold := false
+# Player only. While true, ACTIVE does not end: a charged chain strike keeps its
+# one active window open until every link has landed.
+var hold_active := false
 
 
 # A landed hit freezes the target - but NOT while it is committed to a swing.
@@ -126,17 +129,6 @@ func try_attack(cost: float) -> bool:
 	return state == IDLE and _try(WINDUP, cost, "attack") == "attack"
 
 
-# A chained follow-up may start from IDLE, or cancel the previous swing's
-# RECOVERY once `cancel_from` seconds of it have passed. Never from WINDUP or
-# ACTIVE: the swing that is actually coming out stays committed, and nothing
-# cancels into a dodge. Only the dead time after a swing is given up, and only
-# to another swing. Pass INF to allow no cancel at all.
-func try_chain_attack(cost: float, cancel_from: float) -> bool:
-	if state == IDLE or (state == RECOVERY and t >= cancel_from):
-		return _try(WINDUP, cost, "attack") == "attack"
-	return false
-
-
 # Returns one event string, "" for nothing:
 # "attack" "dodge" "attack_refused" "dodge_refused" "ignored"
 #
@@ -155,7 +147,7 @@ func advance(
 			if t >= windup_time and not hold:
 				_enter(ACTIVE)
 		ACTIVE:
-			if t >= active_time:
+			if t >= active_time and not hold_active:
 				_enter(RECOVERY)
 		RECOVERY:
 			if t >= recovery_time:
@@ -172,7 +164,9 @@ func advance(
 	if drain > 0.0:
 		stamina = maxf(0.0, stamina - drain * delta)
 	regen_timer = maxf(0.0, regen_timer - delta)
-	if regen_timer == 0.0 and drain == 0.0:
+	# Holding a charge pauses regen too: stamina caps the chain's link count, so
+	# waiting at the top of the wind-up must not refill it.
+	if regen_timer == 0.0 and drain == 0.0 and not charging():
 		stamina = minf(stamina_max, stamina + regen_rate * delta)
 
 	# Charging is a voluntary hold, so you can roll out of it the way you can

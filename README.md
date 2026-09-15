@@ -1,6 +1,6 @@
 # isolated — ISOLA combat prototype
 
-Stages 1-2 of `../isola/ISOLA_Combat_Test_Plan.md`, with the combined click/charge
+Stages 1-2 of `../isola/ISOLA_Combat_Test_Plan.md`, with the click / charged-chain
 sword. **Disposable.** Per §8 what carries forward is the tuning knowledge and the
 numbers, not this code.
 
@@ -17,7 +17,7 @@ $GODOT --editor --path .                             # then F5
 ```
 
 `check.gd` asserts the combat rules that break quietly: commitment, stamina gating,
-i-frames, stagger, chain cancel, input buffer, held charge, block, parry. It needs
+i-frames, stagger, held charge, chain link count and target path, block, parry. It needs
 no scene and no window.
 
 ## Controls
@@ -30,28 +30,33 @@ Facing follows the mouse.
 
 | Input | Result |
 |---|---|
-| **Click** | Swing at the cursor. Base damage and knockback, no dash. It fires on press, so a click adds no delay. |
-| **Click again** | Buffered, and chains into the next swing (up to 3). Follow-ups dash in. |
-| **Hold** | The swing pauses at the top of its wind-up and charges (up to `charge_time`, 1s). Move at 35%. |
-| **Hold + pull back** | Aims the charge the opposite way, like drawing the bow. |
-| **Release** | Sends the charged strike, turning you to face it. Charge scales damage, arc, stagger, knockback and dash. |
+| **Click** | One arc swing at the cursor. Base damage and knockback, **never dashes**. Fires on press. A click during a swing is ignored; there is no combo. |
+| **Hold** | The swing pauses at the top of its wind-up and charges. Move at 35%, stamina stops regenerating. The **chain path** is drawn on the ground: yellow rings are locked-in targets, the faint ring is the one the next link would add. |
+| **Release** | Dash-strikes each target on the path in turn: invulnerable, a whole-game hit freeze on every hit, and the last link knocks them flying. No target in range: it goes out as a plain arc. |
 | **Space while charging** | Rolls out. The wind-up before the hold point is still committed. |
 
 **Bow:** hold, pull back, release.
 
-A click and a charge are the same swing. The only difference is whether the button
-is still down when the wind-up would release, which is the Dark Souls heavy-attack
-trick: pressing never waits, and a charge never forces an extra swing first. Each
-swing belongs to the press that started it, so clicking again to chain queues the
-next swing instead of charging the current one.
+**Links.** One link is free, and each `link_charge_time` (0.35s) held adds another,
+up to the lowest of:
 
-Charging drains `sword_drain` stamina; running out sends the strike. Pull-back
-under `charge_aim_deadzone` (25px) strikes straight ahead. `cone_deg` (180 =
-anywhere) limits how far to the side a charge can be aimed.
+- `sword_max_links` (5), the weapon;
+- `skill_max_links` (3), a plain export until there is a skill system;
+- what stamina can pay at `link_cost` (12) each. A click already paid for one link, and a chain pays for the rest on release.
 
-Verified in scripted runs: a click hits exactly one wind-up (0.22s) after the press;
-dash is 0 m on a plain click, 0.99 m on each chain follow-up, and 1.56 m on a 58%
-charge (target 1.58 m); a 1s hold with pull-back released at 83% for 45.8 damage.
+**Targets.** The first is the enemy nearest the **cursor**, within `chain_first_range`
+(6m) of you. Each next one is the nearest unvisited enemy within `chain_hop_range`
+(4.5m) of the last. The chain stops early when nothing is in range.
+
+**The strike.** Each link dashes to `link_standoff` (1.1m) short of its target in
+`link_dash_time` (0.07s), passing through other bodies. The freeze lasts `hitstop_time`
+(0.05s), or `hitstop_last` (0.10s) on the last link. Earlier links don't knock back,
+so targets stay where the path said they were.
+
+Verified in a scripted run with 4 enemies in a line: a click moved the player 0.000m.
+A 1.2s hold showed 3/3 links (the skill cap). Release hit Enemy1, 2 and 3 in order, a
+30-damage hit fired at the player mid-chain returned `dodged`, and `Engine.time_scale`
+went back to 1.
 
 ## Art
 
@@ -76,8 +81,9 @@ in the inspector; every KayKit character uses the same rig.
 | State | Clip |
 |---|---|
 | Idle / walk / run | `Idle_A` / `Walking_A` / `Running_A`, played at a rate that matches movement speed |
-| Chain swings 1 / 2 / 3 | `Melee_1H_Attack_Slice_Horizontal` / `_Slice_Diagonal` / `_Stab` |
+| Click | `Melee_1H_Attack_Slice_Horizontal` |
 | Held charge | `Melee_1H_Attack_Jump_Chop`, frozen at the top of its wind-up |
+| Chain links | Alternating `_Slice_Horizontal` / `_Slice_Diagonal`, `_Jump_Chop` on the last; each restarts so the blade lands as the dash arrives |
 | Dodge | `Dodge_Forward/Backward/Left/Right`, picked from the dodge direction |
 | Stagger / guard break | `Hit_A` |
 | Block stance | `Melee_Blocking` |
@@ -97,7 +103,7 @@ stripped on load because the physics body already does the moving.
 ## Camera
 
 `follow_camera.gd` follows the player at a fixed 50° angle. It only moves and never
-turns, so mouse aim, WASD and the charge pull-back keep meaning the same direction
+turns, so mouse aim, WASD and the bow pull-back keep meaning the same direction
 everywhere. It eases in (`follow_speed`, frame-rate independent) and snaps on load, so
 the reload after each fight doesn't swoop.
 
@@ -118,17 +124,6 @@ Tune `pitch_deg`, `distance` and `follow_speed` live in the inspector. Don't cha
 
 Anything that teleports a body after spawn should call `reset_physics_interpolation()`
 on it, or it will visibly streak from the old spot for one frame.
-
-## Chaining — buffer and cancel
-
-Click in rhythm; don't wait. A click made while a swing is still coming out is
-**buffered** (the label shows `BUFFERED`) and fires on the first frame it legally
-can. A buffered follow-up may also **cancel the previous swing's recovery**, so a
-3-hit chain comes out in about 0.6s (the `CANCEL` popup marks each one).
-
-What stays committed: wind-up and active frames are never cancelled, and nothing
-cancels into a dodge. Only the dead time after a swing is given up, and only to the
-next swing in the chain.
 
 ## Stagger
 
@@ -151,12 +146,11 @@ strategies (bots, not hands):
 
 ## Knockback
 
-Your hits shove enemies straight away from you: 0.6 m light, more with charge,
-×2.5 on the last swing of a chain. A **committed enemy isn't moved**
+Your hits shove enemies straight away from you: 0.6 m light, and
+×2.5 on the last link of a chain (earlier links don't knock). A **committed enemy isn't moved**
 (`armor_knock_mult` 0), because pushing it out of range mid-swing cancels its
 attack through distance, which is stunlock again. Enemies shove you too, and a dodge
-shrugs it off. Getting hit mid-chain can push you out of your own reach; the
-follow-up dash is what closes that gap.
+shrugs it off.
 
 ## The enemy
 
@@ -174,25 +168,26 @@ Drawn by `debug_draw.gd`, which only observes; removing the node changes nothing
 
 - **Arcs** on the ground are the real hit test, measured to the target's **centre**
   (the small cross). Grey at rest: what a click would hit now. Yellow while winding
-  up or charging (widens with charge, white line = aim), red while active, then a
+  up, red while active, then a
   fading ghost. **An outline turns green while the other actor's centre is inside
   it**: that swing would connect right now.
+- **Charging**: a yellow ring at `chain_first_range`. The path itself is always drawn, F1 or not.
 - **Enemy**: its attack arc and a faint `standoff` ring.
 - **Bow**: the shot cone while drawing, then a tracer (green hit, red miss).
 - **Rings**: cyan i-frames, magenta stagger, grey blocking, white armed parry.
-- **Labels**: weapon, state with timer, `chain n/3`, hits landed, `CHARGE %`,
-  health, stamina, `BUFFERED`, and `PUNISH` when an enemy is open.
-- **Popups**: damage with `hit n/3`, `FINISHER`, charge, and `STAGGER` / `KILL` or
-  `no stagger (committed)`; `CANCEL`; damage taken, `BLOCK`, `GUARD BREAK`,
+- **Labels**: weapon, state with timer, links landed, `links n/cap (weapon · skill · stamina)`
+  while charging, `CHAIN n/m` while it plays, health, stamina, and `PUNISH` when an enemy is open.
+- **Popups**: damage with `link n/m`, `FINISHER`, and `STAGGER` / `KILL` or
+  `no stagger (committed)`; damage taken, `BLOCK`, `GUARD BREAK`,
   `PARRY`, `DODGED`; arrow strength.
 
 ## Files
 
 | | |
 |---|---|
-| `combat_state.gd` | Action FSM: wind-up/active/recovery/dodge/stagger, stamina, health, held charge, chain cancel. Pure. Shared by player and enemy. |
-| `stance_state.gd` | Weapon hand: bow/block stances, chain counter, input buffer, block/parry resolution. Pure. Player only. |
-| `gesture.gd` | Pull-back drag for bow and charge aim; flick detection, now only for parry. Pure. |
+| `combat_state.gd` | Action FSM: wind-up/active/recovery/dodge/stagger, stamina, health, held charge, held active window. Pure. Shared by player and enemy. |
+| `stance_state.gd` | Weapon hand: bow/block stances, block/parry resolution, chain link count and target path. Pure. Player only. |
+| `gesture.gd` | Pull-back drag for the bow; flick detection, now only for parry. Pure. |
 | `camera_relative.gd` | Screen/stick direction → world direction. |
 | `follow_camera.gd` | Smooth fixed-angle follow camera. |
 | `player.gd` | Input, aim, movement, hits. Every tunable is `@export`. |
@@ -216,11 +211,11 @@ Starting numbers. Record where you actually land; that record is the deliverable
 | **camera** `pitch_deg` / `distance` / `follow_speed` | 50° / 12.5 / 6.0 | |
 | `windup_time` / `active_time` / `recovery_time` | 0.22 / 0.10 / 0.35 | |
 | `attack_damage` / `attack_reach` / `attack_arc` | 25 / 2.0 / 55° | |
-| `attack_lunge` / `lunge_time` | 1.0 m / 0.08 s | |
-| `charge_time` / `charge_move_mult` | 1.0 s / 0.35 | |
-| `charge_damage_mult` / `charge_lunge_mult` | 1.0 / 1.0 | |
-| `chain_windup_time` / `chain_recovery_time` | 0.12 / 0.20 | |
-| `chain_cancel_from` / `buffer_window` / `chain_window` | 0.0 / 0.4 / 0.45 | |
+| `sword_max_links` / `skill_max_links` / `link_cost` | 5 / 3 / 12 | |
+| `link_charge_time` / `charge_move_mult` | 0.35 s / 0.35 | |
+| `chain_first_range` / `chain_hop_range` | 6 m / 4.5 m | |
+| `link_dash_time` / `link_standoff` | 0.07 s / 1.1 m | |
+| `hitstop_time` / `hitstop_last` | 0.05 s / 0.10 s | |
 | `hit_stagger` | 0.75 | |
 | `attack_knockback` / `finisher_knock_mult` | 0.6 m / 2.5 | |
 | `dodge_time` / `dodge_distance` / `dodge_cost` | 0.40 / 3.5 / 30 | |

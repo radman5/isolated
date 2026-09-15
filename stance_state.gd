@@ -1,8 +1,7 @@
 extends RefCounted
 # The second state axis. combat_state.gd answers "what is my body committed to";
-# this answers "what is my weapon hand doing". Two axes rather than one flat
-# enum because the core loop of §4 - hold, flick, swing, STILL HOLDING, chain -
-# is a stance persisting across a committed swing, which one enum cannot say.
+# this answers "what is my weapon hand doing": bow, block, parry, plus the
+# charged chain strike's link count and target path.
 #
 # Player only. The enemy never instantiates this, which is why the six stance
 # states §9 asks for do not belong in the shared class.
@@ -18,12 +17,6 @@ const NAMES := ["none", "sword", "bow", "block"]
 var sword_drain := 12.0
 var bow_drain := 8.0
 var block_drain := 5.0
-var charge_time := 1.0
-var charged_cost := 15.0
-var chain_cost := 10.0
-var chain_window := 0.45
-var chain_cap := 3
-var cone_deg := 60.0
 var bow_cost := 10.0
 var block_hit_cost := 20.0
 var block_chip := 0.25
@@ -31,19 +24,10 @@ var parry_cost := 15.0
 var parry_window := 0.20
 var parry_enabled := false  # §6: block must pass its gate before this flips
 var stance_break_time := 1.0
-var buffer_window := 0.4
 
 var stance := NONE
-var chain := 0
-var side := -1  # alternates per swing; §4 wants rhythm with no combo system
-var chain_timer := 0.0
 var parry_until := -1.0
 var clock := 0.0  # own clock, so parry timing is testable without Time
-# Tekken-style input buffer: a flick made while a swing is still coming out is
-# kept, and fires on the first frame it legally can. Only the latest flick is
-# kept, and it expires after buffer_window.
-var buffered := Vector2.ZERO
-var buffer_age := 0.0
 
 
 func name_of() -> String:
@@ -52,17 +36,11 @@ func name_of() -> String:
 
 func enter(s: int) -> void:
 	stance = s
-	chain = 0
-	chain_timer = 0.0
-	buffered = Vector2.ZERO
 
 
 func exit() -> void:
 	stance = NONE
-	chain = 0
-	chain_timer = 0.0
 	parry_until = -1.0
-	buffered = Vector2.ZERO
 
 
 # Non-zero drain IS the predicate "a stance is held", so §8's "no regeneration
@@ -78,56 +56,8 @@ func drain() -> float:
 	return 0.0
 
 
-# ponytail: v2 hook (§4). The cap and the reset are two separate conditions on
-# purpose - a weapon swap would set chain = 0 without touching chain_timer, so
-# the chain could be extended without the counter resetting it. Not built.
-func can_chain() -> bool:
-	return chain < chain_cap and chain_timer <= chain_window
-
-
-func buffer_flick(v: Vector2) -> void:
-	buffered = v
-	buffer_age = 0.0
-
-
-func has_buffer() -> bool:
-	return buffered != Vector2.ZERO
-
-
-func take_buffer() -> Vector2:
-	var v := buffered
-	buffered = Vector2.ZERO
-	return v
-
-
-func tick(delta: float, action_state: int) -> void:
+func tick(delta: float) -> void:
 	clock += delta
-	if buffered != Vector2.ZERO:
-		buffer_age += delta
-		if buffer_age > buffer_window:
-			buffered = Vector2.ZERO
-	if chain > 0:
-		# The window is measured from the frame the action FSM returns to IDLE,
-		# not from swing start: a full swing is 0.67s, so a 0.45s window
-		# measured from the start would be unreachable.
-		if action_state == CombatState.IDLE:
-			chain_timer += delta
-			if chain_timer > chain_window:
-				chain = 0
-				chain_timer = 0.0
-		else:
-			chain_timer = 0.0
-
-
-func swing_cost() -> float:
-	return charged_cost if chain == 0 else chain_cost
-
-
-# Call after the swing is actually paid for and started.
-func on_swing() -> void:
-	side = -side
-	chain += 1
-	chain_timer = 0.0
 
 
 func arm_parry() -> void:
@@ -204,11 +134,46 @@ static func move_mult(stance_: int) -> float:
 	return 1.0
 
 
-# Returns a STRIKE YAW clamped to ±half_deg of facing. §4: a flick outside the
-# cone clamps to the nearest edge - it never fails silently and never rotates
-# the player. "Never rotates the player" is structural, not a promise: this is
-# static and holds no node reference, so it has nothing to rotate.
-static func clamp_cone(facing_yaw: float, flick_yaw: float, half_deg: float) -> float:
-	var d := wrapf(flick_yaw - facing_yaw, -PI, PI)
-	var h := deg_to_rad(half_deg)
-	return facing_yaw + clampf(d, -h, h)
+# How many enemies a charged strike will chain through if released now. One link
+# is free at any charge; each link_time held adds another, up to the lowest of
+# the weapon's cap, the skill's cap and what stamina can pay for.
+static func link_count(
+	charge_s: float, link_time: float, weapon_cap: int, skill_cap: int, stamina: float, link_cost: float
+) -> int:
+	var cap := mini(mini(weapon_cap, skill_cap), int(stamina / maxf(link_cost, 0.001)))
+	var grown := 1 + int(charge_s / maxf(link_time, 0.001))
+	return clampi(grown, 1, maxi(cap, 1))
+
+
+# The order a chain visits targets, as indices into `positions`. The first is
+# the enemy nearest the cursor that is within first_range of the player; each
+# next one is the nearest unvisited enemy within hop_range of the last. Stops
+# early when nothing is in range. Positions, not nodes, so check.gd can drive it.
+static func chain_path(
+	cursor: Vector3, origin: Vector3, positions: Array, links: int, first_range: float, hop_range: float
+) -> Array[int]:
+	var path: Array[int] = []
+	var from := cursor
+	var limit_from := origin
+	var limit := first_range
+	while path.size() < links:
+		var best := -1
+		var best_d := INF
+		for i in positions.size():
+			if i in path or _flat_dist(positions[i], limit_from) > limit:
+				continue
+			var d := _flat_dist(positions[i], from)
+			if d < best_d:
+				best_d = d
+				best = i
+		if best < 0:
+			break
+		path.append(best)
+		from = positions[best]
+		limit_from = from
+		limit = hop_range
+	return path
+
+
+static func _flat_dist(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
