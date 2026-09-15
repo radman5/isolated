@@ -82,6 +82,7 @@ script = ExtResource("7_view")
 model = ExtResource("8_ranger")
 right_hand = ExtResource("9_sword")
 left_hand = ExtResource("10_bow")
+left_hand_rotation = Vector3(0, 0, 180)
 
 [node name="DebugDraw" type="Node3D" parent="."]
 script = ExtResource("5_debug")

@@ -17,6 +17,7 @@ const CombatState := preload("res://combat_state.gd")
 const CameraRelative := preload("res://camera_relative.gd")
 const Gesture := preload("res://gesture.gd")
 const Stance := preload("res://stance_state.gd")
+const ArrowModel := preload("res://assets/kaykit/weapons/arrow_bow.gltf")
 
 # For debug_draw.gd only. Gameplay never listens to this; kinds are
 # "swing", "dealt", "taken", "shot".
@@ -108,6 +109,10 @@ signal debug_event(kind: String, data: Dictionary)
 @export var skill_pierce := 1.0
 ## Damage lost per enemy already pierced, compounding.
 @export var pierce_falloff := 0.15
+## Metres per second an arrow flies.
+@export var arrow_speed := 40.0
+## Size of the flying arrow model; 1.0 is hand-sized and hard to see from the camera.
+@export var arrow_scale := 1.6
 ## Degrees between arrows in a volley.
 @export var arrow_spread_deg := 8.0
 ## Pull back at least this far (screen px) to nock the arrow. From then on the
@@ -161,6 +166,7 @@ var _chain: Array = []  # enemies to visit, in order; non-empty only while it pl
 var _link_t := 0.0
 var _chain_vel := Vector3.ZERO
 var _hitstop_until := 0  # msec
+var _flights: Array = []  # arrows in the air: {node, dir, from, len, travelled, hits}
 var _ghosting := false  # passing through enemies: while dodging or chaining
 var _preview := ImmediateMesh.new()
 var _hit_this_swing := {}  # instance ids already hit by the swing in progress
@@ -285,6 +291,7 @@ func _physics_process(delta: float) -> void:
 
 	_aim(delta, cam)
 	_run_chain(delta)
+	_fly_arrows(delta)
 	_update_ghost()
 	_apply_hit()
 	_move(delta, wish)
@@ -524,28 +531,64 @@ func _fire_bow() -> void:
 	cs.stamina -= ss.bow_cost
 	var hits := 0
 	var max_pierce := 0
-	# ponytail: hitscan. Make it a real projectile when arrow travel time becomes
-	# a design question; at this range against a walking enemy it is not one.
+	# ponytail: who gets hit is decided at release (the preview's answer), and each
+	# hit lands when the flying arrow reaches that enemy's distance. An enemy that
+	# walks out of the line mid-flight still gets hit; make it a swept collision
+	# check if that ever reads wrong at this speed (0.35s across the full 14m).
 	for arrow in arrow_hits(strength):
 		var dir: Vector3 = arrow.dir
 		var targets: Array = arrow.targets
+		var planned := []
 		for n in targets.size():
 			var e = targets[n]
-			var dmg := arrow_damage(strength, n)
-			var push := dir * bow_knockback * strength
-			e.take_hit(dmg, hit_stagger * strength, push)
+			var to: Vector3 = e.global_position - global_position
+			planned.append({"at": maxf(Vector2(to.x, to.z).length() - 0.4, 0.0), "e": e, "n": n})
 			hits += 1
 			max_pierce = maxi(max_pierce, n)
-			debug_event.emit("dealt", {
-				"dmg": dmg, "stagger": hit_stagger * strength, "charge": 0.0, "chain": 0, "cap": 0,
-				"source": "arrow", "pierce": n, "target": e, "knock": push.length(), "finisher": false,
-			})
+		_launch(dir, arrow.len, planned, strength)
 		debug_event.emit("shot", {
 			"from": global_position, "dir": dir, "len": arrow.len,
 			"arc": bow_arc, "hit": not targets.is_empty(), "strength": strength,
 		})
 	Metrics.log_event("arrow_fired", {
 		"strength": snappedf(strength, 0.01), "arrows": arrow_count, "hits": hits, "max_pierce": max_pierce,
+	})
+
+
+func _launch(dir: Vector3, length: float, planned: Array, strength: float) -> void:
+	var node: Node3D = ArrowModel.instantiate()
+	get_parent().add_child(node)
+	# Roughly bow height, a little ahead. The model's tip points +Z.
+	var from := global_position + Vector3(0, 0.35, 0) + dir * 0.5
+	node.global_transform = Transform3D(Basis.looking_at(-dir).scaled(Vector3.ONE * arrow_scale), from)
+	node.reset_physics_interpolation()
+	_flights.append({
+		"node": node, "dir": dir, "from": from, "len": length,
+		"travelled": 0.0, "hits": planned, "strength": strength,
+	})
+
+
+func _fly_arrows(delta: float) -> void:
+	for f in _flights:
+		f.travelled = minf(f.travelled + arrow_speed * delta, f.len)
+		f.node.global_position = f.from + f.dir * f.travelled
+		while not f.hits.is_empty() and f.hits[0].at <= f.travelled:
+			var h: Dictionary = f.hits.pop_front()
+			_arrow_hit(h.e, h.n, f.dir, f.strength)
+		if f.travelled >= f.len:
+			f.node.queue_free()
+	_flights = _flights.filter(func(f): return f.travelled < f.len)
+
+
+func _arrow_hit(e, n: int, dir: Vector3, strength: float) -> void:
+	if not is_instance_valid(e) or e.cs.dead():
+		return
+	var dmg := arrow_damage(strength, n)
+	var push := dir * bow_knockback * strength
+	e.take_hit(dmg, hit_stagger * strength, push)
+	debug_event.emit("dealt", {
+		"dmg": dmg, "stagger": hit_stagger * strength, "charge": 0.0, "chain": 0, "cap": 0,
+		"source": "arrow", "pierce": n, "target": e, "knock": push.length(), "finisher": false,
 	})
 
 

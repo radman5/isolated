@@ -35,6 +35,9 @@ const MAX_WINDUP_SPEED := 1.5
 @export var model: PackedScene
 @export var right_hand: PackedScene
 @export var left_hand: PackedScene
+## Turns the weapon in its hand slot, in degrees. The KayKit bow sits in handslot.l
+## with its string facing away from the archer, so the player's bow uses (0, 0, 180).
+@export var left_hand_rotation := Vector3.ZERO
 @export var model_scale := 0.9
 @export var is_enemy := false
 ## Speed at which the run cycle plays at 1x, in m/s.
@@ -80,6 +83,7 @@ func _ready() -> void:
 	_right = _attach(right_hand, "handslot.r")
 	_left = _attach(left_hand, "handslot.l")
 	if _left:
+		_left.rotation_degrees = left_hand_rotation
 		_bow_mesh = _find_blend_mesh(_left)
 	_play("Skeletons_Idle" if is_enemy else "Idle_A", 0.0)
 

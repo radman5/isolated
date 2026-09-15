@@ -46,6 +46,10 @@ Facing follows the mouse.
 the arrow. From then on the draw grows with **time held**, from `bow_min_draw` (20%) to full over
 `bow_charge_time` (1s), and pulling further only aims. The draw scales range, damage and
 pierce budget.
+
+Arrows are the KayKit `arrow_bow` model flying at `arrow_speed` (40 m/s). Who gets hit is
+decided at release, from the same calculation as the preview, and each hit lands as the
+arrow reaches that enemy. So an enemy 12m away is hit about 0.3s later.
 While drawing, the ground shows each arrow's line to where it stops, with a ring on every
 enemy it will hit, dimmer after each pierce. The line is green when it hits and faint
 white with an end mark when it hits nothing. Like the chain path, it's always drawn.
