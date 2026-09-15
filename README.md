@@ -43,7 +43,7 @@ Facing follows the mouse.
 | **Space while charging** | Rolls out. The wind-up before the hold point is still committed. |
 
 **Bow:** hold, pull back to aim, release. Pulling past `bow_draw_threshold` (60px) nocks
-the arrow. From then on the draw grows with **time held**, from `bow_min_draw` (20%) to full over
+the arrow and turns you to face where it will fly, which is opposite the pull. From then on the draw grows with **time held**, from `bow_min_draw` (20%) to full over
 `bow_charge_time` (1s), and pulling further only aims. The draw scales range, damage and
 pierce budget.
 
@@ -76,8 +76,10 @@ up to the lowest of:
 - `skill_max_links` (3), a plain export until there is a skill system;
 - what stamina can pay at `link_cost` (12) each. A click already paid for one link, and a chain pays for the rest on release.
 
-**Targets.** The first is the enemy nearest the **cursor**, within `chain_first_range`
-(6m) of you. Each next one is the nearest unvisited enemy within `chain_hop_range`
+**Targets.** While charging you turn to face the cursor (`charge_turn_rate`, 720°/s). The
+first target is the enemy nearest the **cursor** inside a wedge pointing at it:
+`chain_first_range` (6m) deep and `chain_first_arc` (45°) either side, outlined on the
+ground. Each next one is the nearest unvisited enemy within `chain_hop_range`
 (4.5m) of the last. The chain stops early when nothing is in range.
 
 **The strike.** Each link dashes to `link_standoff` (1.1m) short of its target in
@@ -254,7 +256,8 @@ Starting numbers. Record where you actually land; that record is the deliverable
 | `attack_damage` / `attack_reach` / `attack_arc` | 25 / 2.0 / 55° | |
 | `sword_max_links` / `skill_max_links` / `link_cost` | 5 / 3 / 12 | |
 | `link_charge_time` / `charge_move_mult` | 0.35 s / 0.35 | |
-| `chain_first_range` / `chain_hop_range` | 6 m / 4.5 m | |
+| `chain_first_range` / `chain_first_arc` / `chain_hop_range` | 6 m / 45° / 4.5 m | |
+| `charge_turn_rate` | 720°/s | |
 | `link_dash_time` / `link_standoff` | 0.07 s / 1.1 m | |
 | `hitstop_time` / `hitstop_last` | 0.05 s / 0.10 s | |
 | `hit_stagger` | 0.75 | |

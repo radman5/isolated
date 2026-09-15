@@ -544,6 +544,14 @@ func _chain_path() -> void:
 	assert(Stance.chain_path(o, o, [Vector3(1, 0, 0), Vector3(9, 0, 0)], 3, 6.0, 4.5) == [0], "hopped past hop_range")
 	# Height is ignored.
 	assert(Stance.chain_path(o, o, [Vector3(1, 5, 0)], 1, 2.0, 4.5) == [0], "height broke the range check")
+	# Wedge: the opener must be in front. Facing -Z with a 45 deg half-angle, an
+	# enemy beside or behind is refused even when it is nearest the cursor...
+	var ring := [Vector3(2, 0, 0), Vector3(0, 0, 2), Vector3(0, 0, -3)]
+	var fwd := Vector3(0, 0, -1)
+	assert(Stance.chain_path(Vector3(2, 0, 0), o, ring, 1, 6.0, 4.5, fwd, 45.0) == [2], "opened on an enemy outside the wedge")
+	# ...but later hops go any direction.
+	assert(Stance.chain_path(Vector3(0, 0, -3), o, [Vector3(0, 0, -3), Vector3(3, 0, -3)], 2, 6.0, 4.5, fwd, 45.0) == [0, 1], "a hop was held to the wedge")
+	assert(Stance.chain_path(o, o, [Vector3(2, 0, 0)], 1, 6.0, 4.5, fwd, 45.0).is_empty(), "nothing in the wedge still picked a target")
 
 
 # 23. A held ACTIVE stays open for the whole chain, then ends normally.

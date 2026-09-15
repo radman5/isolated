@@ -84,6 +84,10 @@ signal debug_event(kind: String, data: Dictionary)
 @export var link_charge_time := 0.35
 ## The first target must be this close to the player.
 @export var chain_first_range := 6.0
+## Half-angle of the wedge toward the cursor the first target must be in.
+@export var chain_first_arc := 45.0
+## How fast you turn while holding a sword charge or drawing the bow, deg/s.
+@export var charge_turn_rate := 720.0
 ## Each next target must be this close to the previous one.
 @export var chain_hop_range := 4.5
 ## Seconds to dash to each target.
@@ -387,13 +391,23 @@ func link_cap() -> int:
 # Enemies the chain would visit if released now, in order.
 func chain_targets(links: int) -> Array:
 	var foes := enemies()
-	var cursor = _cursor_point(get_viewport().get_camera_3d())
-	if cursor == null:
-		cursor = global_position - global_transform.basis.z * 2.0
 	var at := foes.map(func(e): return e.global_position)
-	return Stance.chain_path(cursor, global_position, at, links, chain_first_range, chain_hop_range).map(
-		func(i): return foes[i]
-	)
+	return Stance.chain_path(
+		chain_cursor(), global_position, at, links, chain_first_range, chain_hop_range,
+		chain_facing(), chain_first_arc
+	).map(func(i): return foes[i])
+
+
+func chain_cursor() -> Vector3:
+	var cursor = _cursor_point(get_viewport().get_camera_3d())
+	return cursor if cursor != null else global_position - global_transform.basis.z * 2.0
+
+
+# The wedge points at the cursor, not the body, so it never lags the turn.
+func chain_facing() -> Vector3:
+	var to := chain_cursor() - global_position
+	to.y = 0.0
+	return to.normalized() if to.length() > 0.05 else -global_transform.basis.z
 
 
 func chaining() -> bool:
@@ -652,9 +666,20 @@ func receive_hit(amount: float) -> String:
 
 func _aim(delta: float, cam: Camera3D) -> void:
 	var rate := Stance.rot_rate(ss.stance, cs.state)
-	if rate <= 0.0:
-		return
-	var yaw = _cursor_yaw(cam)
+	var yaw = null
+	if ss.stance == Stance.BOW:
+		# Face where the arrow will go: opposite the pull. Only once the pull is
+		# past the nock threshold, so a small wobble on press does not spin you.
+		if g.drag.length() < bow_draw_threshold:
+			return
+		var d := bow_aim()
+		yaw = atan2(-d.x, -d.z)
+		rate = charge_turn_rate
+	elif cs.charging():
+		yaw = _cursor_yaw(cam)
+		rate = charge_turn_rate
+	elif rate > 0.0:
+		yaw = _cursor_yaw(cam)
 	if yaw != null:
 		rotation.y = rotate_toward(rotation.y, yaw, deg_to_rad(rate) * delta)
 
@@ -719,10 +744,9 @@ func _aim_preview() -> void:
 	if cs.charging():
 		var links := links_now()
 		var path := chain_targets(links + 1 if links < link_cap() else links)
-		if path.is_empty():
-			return
 		_preview.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
 		var from := _ground(self)
+		_wedge(from, chain_facing(), chain_first_arc, chain_first_range, Color(1.0, 0.85, 0.2, 0.3))
 		for i in path.size():
 			var at := _ground(path[i])
 			var locked := i < links
@@ -746,6 +770,19 @@ func _aim_preview() -> void:
 				var a := pow(1.0 - pierce_falloff, n)
 				_ring(_ground(arrow.targets[n]), 0.55, 0.07, Color(0.35, 1.0, 0.45, 0.95 * a))
 		_preview.surface_end()
+
+
+# Outline of where a chain's first target can be.
+func _wedge(c: Vector3, facing: Vector3, half_deg: float, r: float, col: Color) -> void:
+	const SEGS := 16
+	var left := facing.rotated(Vector3.UP, deg_to_rad(half_deg))
+	var right := facing.rotated(Vector3.UP, -deg_to_rad(half_deg))
+	_ribbon(c, c + left * r, 0.025, col)
+	_ribbon(c, c + right * r, 0.025, col)
+	for k in SEGS:
+		var a := right.rotated(Vector3.UP, deg_to_rad(2.0 * half_deg * k / SEGS))
+		var b := right.rotated(Vector3.UP, deg_to_rad(2.0 * half_deg * (k + 1) / SEGS))
+		_ribbon(c + a * r, c + b * r, 0.025, col)
 
 
 func _ground(n: Node3D) -> Vector3:

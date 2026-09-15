@@ -99,11 +99,9 @@ func _draw_player(delta: float) -> void:
 
 	match cs.state:
 		CombatState.WINDUP:
-			# The chain path itself is drawn by the player (gameplay UI); these
-			# show the range limits it is picked from.
-			if cs.charging():
-				_circle(pos, _p.chain_first_range, Color(YELLOW, 0.35))
-			else:
+			# While charging, the player draws the chain path and its wedge itself
+			# (gameplay UI, always on).
+			if not cs.charging():
 				var k: float = cs.t / maxf(cs.windup_time, 0.001)
 				_swing_fan(pos, _p.strike_yaw, _p.attack_arc, _p.attack_reach, YELLOW, 0.08 + 0.25 * k, target)
 		CombatState.ACTIVE:

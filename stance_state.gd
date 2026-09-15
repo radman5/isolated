@@ -146,11 +146,14 @@ static func link_count(
 
 
 # The order a chain visits targets, as indices into `positions`. The first is
-# the enemy nearest the cursor that is within first_range of the player; each
-# next one is the nearest unvisited enemy within hop_range of the last. Stops
+# the enemy nearest the cursor inside the wedge in front of the player: within
+# first_range and first_arc_deg (half-angle) of `facing`. Each next one is the
+# nearest unvisited enemy within hop_range of the last, in any direction. Stops
 # early when nothing is in range. Positions, not nodes, so check.gd can drive it.
+# first_arc_deg >= 180 is a full circle and ignores facing.
 static func chain_path(
-	cursor: Vector3, origin: Vector3, positions: Array, links: int, first_range: float, hop_range: float
+	cursor: Vector3, origin: Vector3, positions: Array, links: int, first_range: float, hop_range: float,
+	facing := Vector3.FORWARD, first_arc_deg := 180.0
 ) -> Array[int]:
 	var path: Array[int] = []
 	var from := cursor
@@ -161,6 +164,9 @@ static func chain_path(
 		var best_d := INF
 		for i in positions.size():
 			if i in path or _flat_dist(positions[i], limit_from) > limit:
+				continue
+			if path.is_empty() and first_arc_deg < 180.0 \
+					and not CombatState.in_arc(origin, facing, positions[i], first_range, first_arc_deg):
 				continue
 			var d := _flat_dist(positions[i], from)
 			if d < best_d:
