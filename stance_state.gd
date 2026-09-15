@@ -175,5 +175,35 @@ static func chain_path(
 	return path
 
 
+# Which enemies one arrow hits, in order, as indices into `positions`. It visits
+# everything in its cone nearest first. Each is hit; the arrow carries on past it
+# only while `budget` covers that enemy's toughness, spending it, so it stops
+# inside the first enemy it cannot afford.
+static func arrow_path(
+	origin: Vector3, dir: Vector3, positions: Array, toughness: Array,
+	length: float, arc_deg: float, budget: float
+) -> Array[int]:
+	var inside: Array[int] = []
+	for i in positions.size():
+		if CombatState.in_arc(origin, dir, positions[i], length, arc_deg):
+			inside.append(i)
+	inside.sort_custom(func(a, b): return _flat_dist(positions[a], origin) < _flat_dist(positions[b], origin))
+	var hits: Array[int] = []
+	for i in inside:
+		hits.append(i)
+		if budget < toughness[i]:
+			break
+		budget -= toughness[i]
+	return hits
+
+
+# `count` directions spread `spread_deg` apart, centred on `dir`.
+static func fan_dirs(dir: Vector3, count: int, spread_deg: float) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for i in count:
+		out.append(dir.rotated(Vector3.UP, deg_to_rad((i - (count - 1) * 0.5) * spread_deg)))
+	return out
+
+
 static func _flat_dist(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()

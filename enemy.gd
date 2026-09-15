@@ -48,6 +48,8 @@ const CombatState := preload("res://combat_state.gd")
 @export var armor_knock_mult := 0.0
 
 @export_group("Health")
+## Pierce budget an arrow spends to pass through this enemy.
+@export var toughness := 1.0
 @export var health_max := 100.0
 @export var regen_rate := 22.0  # stamina regen: how soon it can swing again
 @export var regen_delay := 0.30

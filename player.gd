@@ -101,6 +101,15 @@ signal debug_event(kind: String, data: Dictionary)
 @export var bow_damage := 30.0
 @export var bow_range := 14.0
 @export var bow_arc := 8.0
+## Pierce budget at full draw is bow_pierce + skill_pierce, scaled by draw. Each
+## enemy an arrow passes through spends its toughness.
+@export var bow_pierce := 2.0
+## ponytail: a plain export until a skill system exists.
+@export var skill_pierce := 1.0
+## Damage lost per enemy already pierced, compounding.
+@export var pierce_falloff := 0.15
+## Degrees between arrows in a volley.
+@export var arrow_spread_deg := 8.0
 @export var drag_max_px := 300.0
 
 @export_group("Block")
@@ -121,6 +130,10 @@ const SS_TUNABLES := [
 	"bow_drain", "block_drain", "bow_cost", "block_hit_cost", "block_chip",
 	"parry_cost", "parry_window", "parry_enabled", "stance_break_time",
 ]
+
+# Arrows per shot, set by the HUD buttons. Static so it survives the reload
+# after each fight.
+static var arrow_count := 1
 
 var cs := CombatState.new()
 var cam_rel := CameraRelative.new()
@@ -153,8 +166,6 @@ var _swing_press := -1
 var _was_active := false
 var _reject_cool := 0.0
 
-@onready var draw_line: MeshInstance3D = $DrawLine
-@onready var fire_vector: MeshInstance3D = $FireVector
 
 
 func _ready() -> void:
@@ -189,7 +200,7 @@ func _process(_delta: float) -> void:
 	# _process still runs while time_scale is 0, which is what lets it end.
 	if Engine.time_scale == 0.0 and Time.get_ticks_msec() >= _hitstop_until:
 		Engine.time_scale = 1.0
-	_chain_preview()
+	_aim_preview()
 
 
 # Flicks are handled here rather than in _physics_process so the swing starts on
@@ -262,7 +273,6 @@ func _physics_process(delta: float) -> void:
 	_run_chain(delta)
 	_update_ghost()
 	_apply_hit()
-	_bow_visuals(cam)
 	_move(delta, wish)
 
 
@@ -496,35 +506,61 @@ func _fire_bow() -> void:
 	if cs.stamina < ss.bow_cost:
 		Metrics.log_event("attack_refused", {"stamina": snappedf(cs.stamina, 0.1)})
 		return
+	# One cost for the whole volley.
 	cs.stamina -= ss.bow_cost
-	var dir := bow_aim()
-	var length := bow_length(strength)
+	var hits := 0
+	var max_pierce := 0
 	# ponytail: hitscan. Make it a real projectile when arrow travel time becomes
 	# a design question; at this range against a walking enemy it is not one.
-	# The arrow stops at the nearest enemy inside its cone.
-	var target: Node = null
-	var nearest := INF
-	for e in enemies():
-		var d := global_position.distance_to(e.global_position)
-		if d < nearest and CombatState.in_arc(global_position, dir, e.global_position, length, bow_arc):
-			nearest = d
-			target = e
-	if target:
-		var push := dir.normalized() * bow_knockback * strength
-		target.take_hit(bow_damage * strength, hit_stagger * strength, push)
-		debug_event.emit("dealt", {
-			"dmg": bow_damage * strength, "stagger": hit_stagger * strength,
-			"charge": 0.0, "chain": 0, "cap": 0, "source": "arrow",
-			"target": target, "knock": push.length(), "finisher": false,
+	for arrow in arrow_hits(strength):
+		var dir: Vector3 = arrow.dir
+		var targets: Array = arrow.targets
+		for n in targets.size():
+			var e = targets[n]
+			var dmg := arrow_damage(strength, n)
+			var push := dir * bow_knockback * strength
+			e.take_hit(dmg, hit_stagger * strength, push)
+			hits += 1
+			max_pierce = maxi(max_pierce, n)
+			debug_event.emit("dealt", {
+				"dmg": dmg, "stagger": hit_stagger * strength, "charge": 0.0, "chain": 0, "cap": 0,
+				"source": "arrow", "pierce": n, "target": e, "knock": push.length(), "finisher": false,
+			})
+		debug_event.emit("shot", {
+			"from": global_position, "dir": dir, "len": arrow.len,
+			"arc": bow_arc, "hit": not targets.is_empty(), "strength": strength,
 		})
-	debug_event.emit("shot", {
-		"from": global_position, "dir": dir, "len": nearest if target else length,
-		"arc": bow_arc, "hit": target != null, "strength": strength,
+	Metrics.log_event("arrow_fired", {
+		"strength": snappedf(strength, 0.01), "arrows": arrow_count, "hits": hits, "max_pierce": max_pierce,
 	})
-	Metrics.log_event(
-		"arrow_fired",
-		{"strength": snappedf(strength, 0.01), "deg": snappedf(rad_to_deg(atan2(-dir.x, -dir.z)), 1.0), "hit": target != null}
-	)
+
+
+func pierce_budget(strength: float) -> float:
+	return strength * (bow_pierce + skill_pierce)
+
+
+func arrow_damage(strength: float, pierced: int) -> float:
+	return bow_damage * strength * pow(1.0 - pierce_falloff, pierced)
+
+
+# What each arrow of a volley released at `strength` would hit: one
+# {dir, len, targets} per arrow. The shot and the preview both read this, so
+# what is drawn is what lands.
+func arrow_hits(strength: float) -> Array:
+	var foes := enemies()
+	var at := foes.map(func(e): return e.global_position)
+	var tough := foes.map(func(e): return e.toughness)
+	var length := bow_length(strength)
+	var out := []
+	for dir in Stance.fan_dirs(bow_aim().normalized(), arrow_count, arrow_spread_deg):
+		var idx := Stance.arrow_path(global_position, dir, at, tough, length, bow_arc, pierce_budget(strength))
+		var targets := idx.map(func(i): return foes[i])
+		var reach := length
+		if not targets.is_empty():
+			var last: Vector3 = targets[-1].global_position - global_position
+			reach = Vector2(last.x, last.z).length()
+		out.append({"dir": dir, "len": reach, "targets": targets})
+	return out
 
 
 # Fire direction for the bow: opposite the drag, projected into the world.
@@ -617,27 +653,42 @@ func _apply_hit() -> void:
 		Metrics.log_event("enemy_hit", {"id": e.name, "enemy_hp": snappedf(e.cs.health, 0.1)})
 
 
-# While charging: the path a release would take. Bright rings are locked-in
-# links; the faint one is the enemy another link_charge_time would add. Gameplay
-# UI, so it is not behind the F1 debug toggle.
-func _chain_preview() -> void:
+# Where a release would go, drawn on the ground. Sword: the chain path, bright
+# rings on locked-in links and a faint one on what another link would add. Bow:
+# each arrow's line to where it stops, with a ring on every enemy it hits, dimmer
+# after each pierce. Gameplay UI, so not behind the F1 debug toggle.
+func _aim_preview() -> void:
 	_preview.clear_surfaces()
-	if not cs.charging():
-		return
-	var links := links_now()
-	var path := chain_targets(links + 1 if links < link_cap() else links)
-	if path.is_empty():
-		return
-	_preview.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
-	var from := _ground(self)
-	for i in path.size():
-		var at := _ground(path[i])
-		var locked := i < links
-		var col := Color(1.0, 0.85, 0.2, 0.9) if locked else Color(1, 1, 1, 0.3)
-		_ribbon(from, at, 0.06 if locked else 0.03, col)
-		_ring(at, 0.55, 0.07, col)
-		from = at
-	_preview.surface_end()
+	if cs.charging():
+		var links := links_now()
+		var path := chain_targets(links + 1 if links < link_cap() else links)
+		if path.is_empty():
+			return
+		_preview.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+		var from := _ground(self)
+		for i in path.size():
+			var at := _ground(path[i])
+			var locked := i < links
+			var col := Color(1.0, 0.85, 0.2, 0.9) if locked else Color(1, 1, 1, 0.3)
+			_ribbon(from, at, 0.06 if locked else 0.03, col)
+			_ring(at, 0.55, 0.07, col)
+			from = at
+		_preview.surface_end()
+	elif ss.stance == Stance.BOW:
+		var strength := g.drag_strength()
+		_preview.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+		var origin := _ground(self)
+		for arrow in arrow_hits(strength):
+			var hit: bool = not arrow.targets.is_empty()
+			var line_col := Color(0.35, 1.0, 0.45, 0.8) if hit else Color(1, 1, 1, 0.35)
+			var end: Vector3 = origin + arrow.dir * arrow.len
+			_ribbon(origin, end, 0.04, line_col)
+			if not hit:
+				_ring(end, 0.18, 0.05, line_col)
+			for n in arrow.targets.size():
+				var a := pow(1.0 - pierce_falloff, n)
+				_ring(_ground(arrow.targets[n]), 0.55, 0.07, Color(0.35, 1.0, 0.45, 0.95 * a))
+		_preview.surface_end()
 
 
 func _ground(n: Node3D) -> Vector3:
@@ -666,35 +717,19 @@ func _ring(c: Vector3, r: float, w: float, col: Color) -> void:
 			_preview.surface_add_vertex(v)
 
 
-func _bow_visuals(cam: Camera3D) -> void:
-	var drawing := ss.stance == Stance.BOW
-	draw_line.visible = drawing
-	fire_vector.visible = drawing
-	if not drawing or cam == null:
-		return
-	var world := CameraRelative.project(g.drag, cam.global_transform.basis)
-	if world == Vector3.ZERO:
-		return
-	# §5: this readout is the whole reason the mechanic works.
-	draw_line.rotation.y = atan2(-world.x, -world.z) - rotation.y
-	draw_line.scale.z = maxf(g.drag.length() * 0.02, 0.1)
-	fire_vector.rotation.y = draw_line.rotation.y + PI
-	fire_vector.scale.z = maxf(g.drag_strength() * 4.0, 0.1)
-
-
 func _move(delta: float, wish: Vector3) -> void:
-	var target := Vector3.ZERO
-	match cs.state:
-		CombatState.DODGE:
-			target = dodge_dir * (dodge_distance / maxf(dodge_time, 0.01))
-		CombatState.ACTIVE:
-			# Only a chain moves you; a plain swing stands still.
-			target = _chain_vel
-		CombatState.WINDUP:
-			if cs.charging():
-				target = wish * move_speed * charge_move_mult
-		CombatState.IDLE:
-			target = wish * move_speed * Stance.move_mult(ss.stance)
+	# A plain swing never touches movement: wind-up, active and recovery all walk
+	# like idle. Only a dodge, a chain and a held charge override it.
+	var target := wish * move_speed * Stance.move_mult(ss.stance)
+	var dashing := cs.state == CombatState.DODGE or chaining()
+	if cs.state == CombatState.DODGE:
+		target = dodge_dir * (dodge_distance / maxf(dodge_time, 0.01))
+	elif chaining():
+		target = _chain_vel
+	elif cs.charging():
+		target = wish * move_speed * charge_move_mult
+	elif cs.state == CombatState.STAGGER:
+		target = Vector3.ZERO
 
 	# A live shove owns horizontal velocity outright, so steering cannot walk
 	# straight back through it.
@@ -702,7 +737,7 @@ func _move(delta: float, wish: Vector3) -> void:
 		velocity.x = _knock.x
 		velocity.z = _knock.z
 		_knock *= exp(-knock_friction * delta)
-	elif cs.state == CombatState.DODGE or cs.state == CombatState.ACTIVE:
+	elif dashing:
 		_knock = Vector3.ZERO
 		velocity.x = target.x
 		velocity.z = target.z

@@ -30,19 +30,37 @@ scene dropped there. `Backspace` brings the menu back.
 ## Controls
 
 `WASD` move · `Space` dodge · **hold RMB** block · `1`/`2` sword/bow ·
-`-`/`=` enemy count · `F1` debug · `Esc` free the cursor · `R` restart.
+`-`/`=` enemy count · `[`/`]` arrow count · `F1` debug · `Esc` free the cursor · `R` restart.
 Facing follows the mouse.
 
 **Sword**
 
 | Input | Result |
 |---|---|
-| **Click** | One arc swing at the cursor. Base damage and knockback, **never dashes**. Fires on press. A click during a swing is ignored; there is no combo. |
+| **Click** | One arc swing at the cursor. Base damage and knockback, **never dashes** and never slows or stops your movement: you walk at full speed through the whole swing. Fires on press. A click during a swing is ignored; there is no combo. |
 | **Hold** | The swing pauses at the top of its wind-up and charges. Move at 35%, stamina stops regenerating. The **chain path** is drawn on the ground: yellow rings are locked-in targets, the faint ring is the one the next link would add. |
 | **Release** | Dash-strikes each target on the path in turn: invulnerable, a whole-game hit freeze on every hit, and the last link knocks them flying. No target in range: it goes out as a plain arc. |
 | **Space while charging** | Rolls out. The wind-up before the hold point is still committed. |
 
-**Bow:** hold, pull back, release.
+**Bow:** hold, pull back, release. The draw is how far you pull (`drag_max_px`, 300px).
+While drawing, the ground shows each arrow's line to where it stops, with a ring on every
+enemy it will hit, dimmer after each pierce. The line is green when it hits and faint
+white with an end mark when it hits nothing. Like the chain path, it's always drawn.
+
+- **Pierce.** An arrow's budget is `draw × (bow_pierce + skill_pierce)`, which is 2 + 1 = 3 at
+  full draw. It visits enemies in its cone nearest first. Each one is hit, and the arrow
+  carries on only while the budget covers that enemy's `toughness` (1 on the Skeleton
+  Warrior), spending it. So a full draw passes three skeletons and stops in the fourth.
+  A light tap stops in the first.
+- **Falloff.** Each earlier pierce costs `pierce_falloff` (15%), compounding: 30 → 25.5 →
+  21.7 → 18.4 at full draw.
+- **Volley.** The `arrows` −/+ buttons (or `[`/`]`) set 1–7 arrows, `arrow_spread_deg` (8°)
+  apart around the aim. Each pierces on its own, and the volley costs one `bow_cost`.
+  It changes live, without restarting the fight.
+
+Verified in a scripted run with 4 enemies in a line and one to the side: a full draw
+previewed Enemy1–4 and landed exactly 30, 25.5, 21.7, 18.4. With 3 arrows, two lines ran
+down the row and the third hit the side enemy.
 
 **Links.** One link is free, and each `link_charge_time` (0.35s) held adds another,
 up to the lowest of:
@@ -62,7 +80,7 @@ target `link_knockback` (2.5m) off to the side, away from where the next link go
 the dash line is clear when the chain ends. Targets are followed live, so this
 doesn't break the path.
 
-Verified in a scripted run with 4 enemies in a line: a click moved the player 0.000m.
+Verified in a scripted run with 4 enemies in a line: a click with no movement input moved the player 0.000m.
 A 1.2s hold showed 3/3 links (the skill cap). Release hit Enemy1, 2 and 3 in order, a
 30-damage hit fired at the player mid-chain returned `dodged`, and `Engine.time_scale`
 went back to 1.
@@ -188,7 +206,7 @@ Drawn by `debug_draw.gd`, which only observes; removing the node changes nothing
   it**: that swing would connect right now.
 - **Charging**: a yellow ring at `chain_first_range`. The path itself is always drawn, F1 or not.
 - **Enemy**: its attack arc and a faint `standoff` ring.
-- **Bow**: the shot cone while drawing, then a tracer (green hit, red miss).
+- **Bow**: the shot cone while drawing, then a tracer (green hit, red miss). The label shows draw %, pierce budget and arrow count; popups show `pierce n`.
 - **Rings**: cyan i-frames, magenta stagger, grey blocking, white armed parry.
 - **Labels**: weapon, state with timer, links landed, `links n/cap (weapon · skill · stamina)`
   while charging, `CHAIN n/m` while it plays, health, stamina, and `PUNISH` when an enemy is open.
@@ -201,7 +219,7 @@ Drawn by `debug_draw.gd`, which only observes; removing the node changes nothing
 | | |
 |---|---|
 | `combat_state.gd` | Action FSM: wind-up/active/recovery/dodge/stagger, stamina, health, held charge, held active window. Pure. Shared by player and enemy. |
-| `stance_state.gd` | Weapon hand: bow/block stances, block/parry resolution, chain link count and target path. Pure. Player only. |
+| `stance_state.gd` | Weapon hand: bow/block stances, block/parry resolution, chain link count and target path, arrow pierce path and volley fan. Pure. Player only. |
 | `gesture.gd` | Pull-back drag for the bow; flick detection, now only for parry. Pure. |
 | `camera_relative.gd` | Screen/stick direction → world direction. |
 | `follow_camera.gd` | Smooth fixed-angle follow camera. |
@@ -233,6 +251,8 @@ Starting numbers. Record where you actually land; that record is the deliverable
 | `link_dash_time` / `link_standoff` | 0.07 s / 1.1 m | |
 | `hitstop_time` / `hitstop_last` | 0.05 s / 0.10 s | |
 | `hit_stagger` | 0.75 | |
+| `bow_pierce` / `skill_pierce` / `pierce_falloff` | 2 / 1 / 15% | |
+| `arrow_spread_deg` / **enemy** `toughness` | 8° / 1 | |
 | `attack_knockback` / `link_knockback` / `finisher_knock_mult` | 1.2 m / 2.5 m / 2.5 | |
 | `dodge_time` / `dodge_distance` / `dodge_cost` | 0.40 / 3.5 / 30 | |
 | `iframe_start` / `iframe_end` | 0.05 / 0.28 | |

@@ -36,6 +36,8 @@ func _initialize() -> void:
 	_parry_flag()
 	_held_charge()
 	_hold_active()
+	_arrow_path()
+	_fan_dirs()
 	print("OK")
 	quit()
 
@@ -564,3 +566,36 @@ func _hold_active() -> void:
 	for i in 120:
 		cs.advance(DT, false, false)
 	assert(cs.charging() and cs.stamina == 40.0, "stamina regenerated while charging")
+
+
+# 24. Arrow pierce: nearest first, every visited enemy is hit, and it passes one
+#     only while the budget covers that enemy's toughness.
+func _arrow_path() -> void:
+	var o := Vector3.ZERO
+	var fwd := Vector3(0, 0, -1)
+	var line := [Vector3(0, 0, -6), Vector3(0, 0, -2), Vector3(0, 0, -4), Vector3(0, 0, -8)]
+	var ones := [1.0, 1.0, 1.0, 1.0]
+	assert(Stance.arrow_path(o, fwd, line, ones, 14.0, 8.0, 0.0) == [1], "budget 0 did not stop in the first")
+	var p: Array = Stance.arrow_path(o, fwd, line, ones, 14.0, 8.0, 2.0)
+	assert(p == [1, 2, 0], "budget 2 should pass two and stop in the third, nearest first: %s" % [p])
+	assert(Stance.arrow_path(o, fwd, line, ones, 14.0, 8.0, 9.0) == [1, 2, 0, 3], "a big budget missed one")
+	# A tough enemy stops the arrow inside it.
+	assert(Stance.arrow_path(o, fwd, line, [1.0, 3.0, 1.0, 1.0], 14.0, 8.0, 2.0) == [1], "passed a toughness-3 enemy on budget 2")
+	# Spent, not checked: 1.5 covers the first but not the second.
+	assert(Stance.arrow_path(o, fwd, line, ones, 14.0, 8.0, 1.5) == [1, 2], "the budget was not spent")
+	# Outside the cone or past the range is never hit.
+	var aside := [Vector3(3, 0, -3), Vector3(0, 0, -20), Vector3(0, 0, -3)]
+	assert(Stance.arrow_path(o, fwd, aside, [1.0, 1.0, 1.0], 14.0, 8.0, 9.0) == [2], "hit outside the cone or range")
+
+
+# 25. A volley fans out evenly around the aim.
+func _fan_dirs() -> void:
+	var fwd := Vector3(0, 0, -1)
+	var one: Array = Stance.fan_dirs(fwd, 1, 8.0)
+	assert(one.size() == 1 and one[0].is_equal_approx(fwd), "a single arrow was not straight")
+	var three: Array = Stance.fan_dirs(fwd, 3, 8.0)
+	assert(three[1].is_equal_approx(fwd), "the middle arrow was not on the aim")
+	assert(is_equal_approx(rad_to_deg(fwd.signed_angle_to(three[0], Vector3.UP)), -8.0), "left arrow not -8")
+	assert(is_equal_approx(rad_to_deg(fwd.signed_angle_to(three[2], Vector3.UP)), 8.0), "right arrow not +8")
+	var two: Array = Stance.fan_dirs(fwd, 2, 8.0)
+	assert(is_equal_approx(fwd.signed_angle_to(two[0], Vector3.UP), -fwd.signed_angle_to(two[1], Vector3.UP)), "even fan not symmetric")

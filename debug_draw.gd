@@ -134,7 +134,8 @@ func _draw_player(delta: float) -> void:
 			int((cs.stamina + _p.link_cost) / _p.link_cost),
 		]
 	elif ss.stance == Stance.BOW:
-		extra = "  draw %.0f%%" % (_p.g.drag_strength() * 100.0)
+		var s: float = _p.g.drag_strength()
+		extra = "  draw %.0f%% · pierce budget %.1f · arrows %d" % [s * 100.0, _p.pierce_budget(s), _p.arrow_count]
 	var flags := ""
 	if cs.invulnerable():
 		flags += "  IFRAMES"
@@ -218,6 +219,8 @@ func _on_event(kind: String, d: Dictionary) -> void:
 					txt += "  FINISHER"
 			elif d.source == "arrow":
 				txt += "   arrow"
+				if d.get("pierce", 0) > 0:
+					txt += "  pierce %d" % d.pierce
 			# The trade rule, made visible: a committed target does not flinch.
 			var staggered: bool = e.cs.state == CombatState.STAGGER
 			if staggered:

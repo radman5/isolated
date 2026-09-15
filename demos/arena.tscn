@@ -20,10 +20,6 @@ ambient_light_energy = 1.0
 [sub_resource type="StandardMaterial3D" id="mat_ground"]
 albedo_color = Color(0.22, 0.23, 0.25, 1)
 
-[sub_resource type="StandardMaterial3D" id="mat_hit"]
-shading_mode = 0
-albedo_color = Color(0.95, 0.2, 0.15, 1)
-
 [sub_resource type="BoxShape3D" id="sh_ground"]
 size = Vector3(40, 1, 40)
 
@@ -36,13 +32,6 @@ size = Vector3(0.4, 3, 0.4)
 [sub_resource type="CapsuleShape3D" id="sh_player"]
 radius = 0.5
 height = 2.0
-
-[sub_resource type="StandardMaterial3D" id="mat_draw"]
-shading_mode = 0
-albedo_color = Color(0.35, 0.8, 1, 1)
-
-[sub_resource type="BoxMesh" id="me_line"]
-size = Vector3(0.08, 0.08, 1)
 
 [node name="Arena" type="Node3D"]
 script = ExtResource("4_fight")
@@ -93,18 +82,6 @@ script = ExtResource("7_view")
 model = ExtResource("8_ranger")
 right_hand = ExtResource("9_sword")
 left_hand = ExtResource("10_bow")
-
-[node name="DrawLine" type="MeshInstance3D" parent="Player"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, -0.5)
-visible = false
-mesh = SubResource("me_line")
-surface_material_override/0 = SubResource("mat_draw")
-
-[node name="FireVector" type="MeshInstance3D" parent="Player"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, -0.5)
-visible = false
-mesh = SubResource("me_line")
-surface_material_override/0 = SubResource("mat_hit")
 
 [node name="DebugDraw" type="Node3D" parent="."]
 script = ExtResource("5_debug")

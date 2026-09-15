@@ -13,6 +13,7 @@ extends Node3D
 
 const EnemyScene := preload("res://enemy.tscn")
 const MAX_ENEMIES := 8
+const MAX_ARROWS := 7
 # Spawn points, filled in order, all inside the fixed camera's frame.
 const SLOTS := [
 	Vector3(0, 0, -6), Vector3(-4, 0, -5), Vector3(4, 0, -5), Vector3(-6, 0, -1),
@@ -26,6 +27,7 @@ static var enemy_count := 1
 var _t0 := 0.0
 var _over := false
 var _reset_in := 0.0
+var _arrow_label := Label.new()
 
 @onready var player: Node = $Player
 
@@ -79,6 +81,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_change_enemies(-1)
 		KEY_EQUAL, KEY_KP_ADD:
 			_change_enemies(1)
+		KEY_BRACKETLEFT:
+			_change_arrows(-1)
+		KEY_BRACKETRIGHT:
+			_change_arrows(1)
 
 
 func _change_enemies(d: int) -> void:
@@ -90,28 +96,47 @@ func _change_enemies(d: int) -> void:
 	get_tree().reload_current_scene.call_deferred()
 
 
+# Arrows change live: a volley size is not a property of the fight, so there is
+# nothing to restart.
+func _change_arrows(d: int) -> void:
+	var n := clampi(player.arrow_count + d, 1, MAX_ARROWS)
+	if n == player.arrow_count:
+		return
+	player.arrow_count = n
+	_arrow_label.text = "  arrows %d  " % n
+	Metrics.log_event("arrows_changed", {"count": n})
+
+
 func _build_controls() -> void:
+	var rows := VBoxContainer.new()
+	rows.anchor_left = 1.0
+	rows.anchor_right = 1.0
+	rows.offset_left = -260.0
+	rows.offset_right = -12.0
+	rows.offset_top = 8.0
+	var enemy_label := Label.new()
+	enemy_label.text = "  enemies %d  " % enemy_count
+	rows.add_child(_row(enemy_label, _change_enemies))
+	_arrow_label.text = "  arrows %d  " % player.arrow_count
+	rows.add_child(_row(_arrow_label, _change_arrows))
+	$HUD.add_child(rows)
+
+
+func _row(label: Label, change: Callable) -> HBoxContainer:
 	var box := HBoxContainer.new()
-	box.anchor_left = 1.0
-	box.anchor_right = 1.0
-	box.offset_left = -260.0
-	box.offset_right = -12.0
-	box.offset_top = 8.0
 	box.alignment = BoxContainer.ALIGNMENT_END
-	var label := Label.new()
-	label.text = "  enemies %d  " % enemy_count
-	box.add_child(_button("  −  ", -1))
+	box.add_child(_button("  −  ", change.bind(-1)))
 	box.add_child(label)
-	box.add_child(_button("  +  ", 1))
-	$HUD.add_child(box)
+	box.add_child(_button("  +  ", change.bind(1)))
+	return box
 
 
-func _button(text: String, d: int) -> Button:
+func _button(text: String, on_press: Callable) -> Button:
 	var b := Button.new()
 	b.text = text
 	# Never take focus. A focused Button activates on ui_accept, and Space is dodge.
 	b.focus_mode = Control.FOCUS_NONE
-	b.pressed.connect(_change_enemies.bind(d))
+	b.pressed.connect(on_press)
 	return b
 
 

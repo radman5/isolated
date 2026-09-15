@@ -53,4 +53,4 @@ func _process(_delta: float) -> void:
 				e.name, "dead" if ec.dead() else ec.state_name(), ec.t, ec.health,
 				"  PUNISH" if open and not ec.dead() else "",
 			]
-	text += "\n\nLMB click swing / hold to charge a chain, release to strike  RMB block  Space dodge  1/2 weapon\nC = camera-blame   R = restart   Esc = free cursor   -/+ enemies   F1 debug"
+	text += "\n\nLMB click swing / hold to charge a chain, release to strike  RMB block  Space dodge  1/2 weapon\nC = camera-blame   R = restart   Esc = free cursor   -/+ enemies   [/] arrows   F1 debug"
