@@ -11,13 +11,14 @@ config_version=5
 [application]
 
 config/name="isolated"
-run/main_scene="res://arena.tscn"
+run/main_scene="res://demos/arena.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"
 
 [autoload]
 
 Metrics="*res://metrics.gd"
+DemoMenu="*res://demo_menu.gd"
 
 [display]
 
@@ -92,6 +93,11 @@ debug_camera_blame={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"physical_keycode":67)
 , Object(InputEventJoypadButton,"button_index":4)
+]
+}
+demo_menu={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":4194308)
 ]
 }
 

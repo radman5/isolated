@@ -20,6 +20,13 @@ $GODOT --editor --path .                             # then F5
 i-frames, stagger, held charge, chain link count and target path, block, parry. It needs
 no scene and no window.
 
+## Share (web build)
+
+Every push to `main` runs `.github/workflows/web.yml`: `check.gd` must print `OK`, then the
+`Web` preset is exported and deployed to GitHub Pages (`https://<user>.github.io/<repo>/`).
+The game opens on a demo menu that lists every `.tscn` in `demos/`, so a new demo is just a
+scene dropped there. `Backspace` brings the menu back.
+
 ## Controls
 
 `WASD` move · `Space` dodge · **hold RMB** block · `1`/`2` sword/bow ·
@@ -205,6 +212,7 @@ Drawn by `debug_draw.gd`, which only observes; removing the node changes nothing
 | `debug_draw.gd` · `debug_hud.gd` | Debug view and text overlay. |
 | `metrics.gd` | Autoload. JSONL to `user://run_*.jsonl`, path printed at startup. |
 | `check.gd` | Headless asserts. |
+| `demo_menu.gd` · `demos/` | Autoload. Start menu over every scene in `demos/`. |
 
 Tunables are re-pushed every frame, so **edits in the remote inspector land live
 while playing** (Debugger → Remote scene tree → Player).
