@@ -53,6 +53,31 @@ Verified in scripted runs: a click hits exactly one wind-up (0.22s) after the pr
 dash is 0 m on a plain click, 0.99 m on each chain follow-up, and 1.56 m on a 58%
 charge (target 1.58 m); a 1s hold with pull-back released at 83% for 45.8 damage.
 
+## Camera
+
+`follow_camera.gd` follows the player at a fixed 50° angle. It only moves and never
+turns, so mouse aim, WASD and the charge pull-back keep meaning the same direction
+everywhere. It eases in (`follow_speed`, frame-rate independent) and snaps on load, so
+the reload after each fight doesn't swoop.
+
+**Why it's smooth.** The display here runs at 120Hz, but physics runs at 60Hz, so a body's
+real position only changes every other frame. `physics/common/physics_interpolation`
+is on, and the camera follows the *interpolated* position. The debug view draws at
+interpolated positions too, so arcs and labels don't jitter against the capsules.
+
+Measured in a scripted walk with a dodge, 118 fps, per-frame speed change:
+
+| | interpolation on | interpolation off |
+|---|---|---|
+| player on screen | 1% | **199%** (stalls every other frame) |
+| camera | 3% (worst 0.42 m/s) | 5% |
+
+Tune `pitch_deg`, `distance` and `follow_speed` live in the inspector. Don't change
+`yaw_deg` during play: it changes what "up the screen" means.
+
+Anything that teleports a body after spawn should call `reset_physics_interpolation()`
+on it, or it will visibly streak from the old spot for one frame.
+
 ## Chaining — buffer and cancel
 
 Click in rhythm; don't wait. A click made while a swing is still coming out is
@@ -128,6 +153,7 @@ Drawn by `debug_draw.gd`, which only observes; removing the node changes nothing
 | `stance_state.gd` | Weapon hand: bow/block stances, chain counter, input buffer, block/parry resolution. Pure. Player only. |
 | `gesture.gd` | Pull-back drag for bow and charge aim; flick detection, now only for parry. Pure. |
 | `camera_relative.gd` | Screen/stick direction → world direction. |
+| `follow_camera.gd` | Smooth fixed-angle follow camera. |
 | `player.gd` | Input, aim, movement, hits. Every tunable is `@export`. |
 | `enemy.gd` · `enemy.tscn` | The enemy. |
 | `fight.gd` | Spawning, enemy-count controls, fight clock, win/lose, reset. |
@@ -145,6 +171,7 @@ Starting numbers. Record where you actually land; that record is the deliverable
 | Knob | Start | Landed on |
 |---|---|---|
 | `move_speed` | 5.0 | |
+| **camera** `pitch_deg` / `distance` / `follow_speed` | 50° / 12.5 / 6.0 | |
 | `windup_time` / `active_time` / `recovery_time` | 0.22 / 0.10 / 0.35 | |
 | `attack_damage` / `attack_reach` / `attack_arc` | 25 / 2.0 / 55° | |
 | `attack_lunge` / `lunge_time` | 1.0 m / 0.08 s | |

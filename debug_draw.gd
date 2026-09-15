@@ -43,6 +43,9 @@ var _swing := {}
 
 
 func _ready() -> void:
+	# Everything here is placed in _process at interpolated positions. Letting
+	# the engine interpolate these transforms again would smear the labels.
+	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	var mi := MeshInstance3D.new()
 	mi.mesh = _im
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -87,9 +90,9 @@ func _process(delta: float) -> void:
 func _draw_player(delta: float) -> void:
 	var cs = _p.cs
 	var ss = _p.ss
-	var pos: Vector3 = _p.global_position
+	var pos := _ipos(_p)
 	var target: Array = _enemies().filter(func(e): return not e.cs.dead()).map(
-		func(e): return e.global_position
+		func(e): return _ipos(e)
 	)
 	_cross(pos, GREY)
 	_rings(pos, cs, ss)
@@ -158,8 +161,8 @@ func _requested_line(pos: Vector3) -> void:
 func _draw_enemy(e: Node, delta: float) -> void:
 	var cs = e.cs
 	var id := e.get_instance_id()
-	var pos: Vector3 = e.global_position
-	var target: Array = [_p.global_position] if _p else []
+	var pos := _ipos(e)
+	var target: Array = [_ipos(_p)] if _p else []
 	var yaw: float = e.rotation.y
 	_cross(pos, GREY)
 	_rings(pos, cs, null)
@@ -370,6 +373,12 @@ func _style(l: Label3D, size: int) -> void:
 	l.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 	l.render_priority = 10
 	l.outline_render_priority = 9
+
+
+# Where a body is drawn this frame. Its global_position is only exact on physics
+# ticks; between them the renderer shows an interpolated one.
+func _ipos(n: Node3D) -> Vector3:
+	return n.get_global_transform_interpolated().origin
 
 
 func _enemies() -> Array:
