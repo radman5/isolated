@@ -145,7 +145,7 @@ var cone_flash := 0.0  # latched so a one-frame clamp is actually visible
 var last_flick_deg := 0.0
 var draw_strength := 0.0
 
-var _dodge_dir := Vector3.FORWARD
+var dodge_dir := Vector3.FORWARD  # read by character_view to pick the dodge animation
 var strike_yaw := 0.0  # cone-clamped direction of the current swing
 var chain_hits := 0  # hits landed in the current chain
 var _swing_level := 0.0
@@ -163,7 +163,6 @@ var _buffered_press := -1
 var _was_active := false
 var _reject_cool := 0.0
 
-@onready var attack_box: MeshInstance3D = $AttackBox
 @onready var draw_line: MeshInstance3D = $DrawLine
 @onready var fire_vector: MeshInstance3D = $FireVector
 
@@ -244,7 +243,7 @@ func _physics_process(delta: float) -> void:
 		# §7: dodge beats everything. It is the input most needed under pressure.
 		_exit_stance("dodge")
 		_knock = Vector3.ZERO
-		_dodge_dir = wish if wish != Vector3.ZERO else -global_transform.basis.z
+		dodge_dir = wish if wish != Vector3.ZERO else -global_transform.basis.z
 	if ev != "":
 		Metrics.log_event(ev, {"stamina": snappedf(cs.stamina, 0.1)})
 	# A stance cannot survive being staggered.
@@ -535,7 +534,6 @@ func _cursor_yaw(cam: Camera3D) -> Variant:
 
 
 func _apply_hit() -> void:
-	attack_box.visible = cs.state == CombatState.ACTIVE
 	var active_now := cs.state == CombatState.ACTIVE
 	if active_now and not _was_active:
 		_hit_this_swing.clear()
@@ -593,7 +591,7 @@ func _move(delta: float, wish: Vector3) -> void:
 	var target := Vector3.ZERO
 	match cs.state:
 		CombatState.DODGE:
-			target = _dodge_dir * (dodge_distance / maxf(dodge_time, 0.01))
+			target = dodge_dir * (dodge_distance / maxf(dodge_time, 0.01))
 		CombatState.ACTIVE:
 			# Front-loaded dash along the strike direction. Speed falls off as
 			# (1-x)^2, which covers attack_lunge metres in lunge_time and then stops

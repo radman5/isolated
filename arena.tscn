@@ -5,6 +5,10 @@
 [ext_resource type="Script" path="res://fight.gd" id="4_fight"]
 [ext_resource type="Script" path="res://debug_draw.gd" id="5_debug"]
 [ext_resource type="Script" path="res://follow_camera.gd" id="6_camera"]
+[ext_resource type="Script" path="res://character_view.gd" id="7_view"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/characters/Ranger.glb" id="8_ranger"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/weapons/sword_1handed.gltf" id="9_sword"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/weapons/bow_withString.gltf" id="10_bow"]
 
 [sub_resource type="Environment" id="env"]
 background_mode = 1
@@ -32,16 +36,6 @@ size = Vector3(0.4, 3, 0.4)
 [sub_resource type="CapsuleShape3D" id="sh_player"]
 radius = 0.5
 height = 2.0
-
-[sub_resource type="CapsuleMesh" id="me_player"]
-radius = 0.5
-height = 2.0
-
-[sub_resource type="BoxMesh" id="me_nose"]
-size = Vector3(0.2, 0.2, 0.4)
-
-[sub_resource type="BoxMesh" id="me_swing"]
-size = Vector3(1.6, 0.2, 1.2)
 
 [sub_resource type="StandardMaterial3D" id="mat_draw"]
 shading_mode = 0
@@ -94,18 +88,11 @@ script = ExtResource("1_player")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
 shape = SubResource("sh_player")
 
-[node name="Body" type="MeshInstance3D" parent="Player"]
-mesh = SubResource("me_player")
-
-[node name="Nose" type="MeshInstance3D" parent="Player"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, -0.6)
-mesh = SubResource("me_nose")
-
-[node name="AttackBox" type="MeshInstance3D" parent="Player"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -1.1)
-visible = false
-mesh = SubResource("me_swing")
-surface_material_override/0 = SubResource("mat_hit")
+[node name="Model" type="Node3D" parent="Player"]
+script = ExtResource("7_view")
+model = ExtResource("8_ranger")
+right_hand = ExtResource("9_sword")
+left_hand = ExtResource("10_bow")
 
 [node name="DrawLine" type="MeshInstance3D" parent="Player"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, -0.5)

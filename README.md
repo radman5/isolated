@@ -53,6 +53,47 @@ Verified in scripted runs: a click hits exactly one wind-up (0.22s) after the pr
 dash is 0 m on a plain click, 0.99 m on each chain follow-up, and 1.56 m on a 58%
 charge (target 1.58 m); a 1s hold with pull-back released at 83% for 45.8 damage.
 
+## Art
+
+Characters, weapons and animations are **KayKit** by Kay Lousberg, all **CC0**
+(free for commercial use, no credit required). The license files are in
+`assets/kaykit/licenses/`.
+
+| Pack | Used |
+|---|---|
+| [Adventurers 2.0](https://kaylousberg.itch.io/kaykit-adventurers) | `Ranger.glb` (player), `sword_1handed`, `bow_withString`; the other 5 characters are included for swapping |
+| [Skeletons 1.1](https://kaylousberg.itch.io/kaykit-skeletons) | `Skeleton_Warrior.glb` (enemy), `Skeleton_Blade`; 3 more skeletons included |
+| [Character Animations 1.1](https://kaylousberg.itch.io/kaykit-character-animations) | 6 `Rig_Medium_*.glb` animation libraries, shared by every character |
+
+Only the glTF files were copied in. The packs also ship FBX, OBJ and Unity versions,
+plus clips not used here; re-download from the links above if you need them.
+
+`character_view.gd` (the `Model` node on Player and Enemy) is purely visual. It watches
+the combat state and plays the matching clip, so gameplay and `check.gd` are untouched.
+**Swap a character** by changing `model` / `right_hand` / `left_hand` on that node
+in the inspector; every KayKit character uses the same rig.
+
+| State | Clip |
+|---|---|
+| Idle / walk / run | `Idle_A` / `Walking_A` / `Running_A`, played at a rate that matches movement speed |
+| Chain swings 1 / 2 / 3 | `Melee_1H_Attack_Slice_Horizontal` / `_Slice_Diagonal` / `_Stab` |
+| Held charge | `Melee_1H_Attack_Jump_Chop`, frozen at the top of its wind-up |
+| Dodge | `Dodge_Forward/Backward/Left/Right`, picked from the dodge direction |
+| Stagger / guard break | `Hit_A` |
+| Block stance | `Melee_Blocking` |
+| Bow | `Ranged_Bow_Draw` → `Ranged_Bow_Aiming_Idle` → `Ranged_Bow_Release`; bowstring bends with draw |
+| Death | `Death_A` (player), `Skeletons_Death` (enemy) |
+| Enemy | `Skeletons_Idle`, `Skeletons_Walking`, `Melee_1H_Attack_Chop` |
+
+**Swings are fitted to the game's timings, not the other way round.** Each attack's
+impact moment (where the hand moves fastest) was measured by sampling
+`handslot.r` across the clip, and the clip is time-warped so impact lands as the active
+frames begin, whatever `windup_time` is tuned to. The enemy's chop lands at 0.59s of a
+0.60s telegraph, so it plays close to natural speed.
+
+Dodges and the skeleton death carry up to 0.7m of sideways root motion, which is
+stripped on load because the physics body already does the moving.
+
 ## Camera
 
 `follow_camera.gd` follows the player at a fixed 50° angle. It only moves and never
@@ -157,6 +198,7 @@ Drawn by `debug_draw.gd`, which only observes; removing the node changes nothing
 | `player.gd` | Input, aim, movement, hits. Every tunable is `@export`. |
 | `enemy.gd` · `enemy.tscn` | The enemy. |
 | `fight.gd` | Spawning, enemy-count controls, fight clock, win/lose, reset. |
+| `character_view.gd` | KayKit model, weapons and animations for an actor. Visual only. |
 | `debug_draw.gd` · `debug_hud.gd` | Debug view and text overlay. |
 | `metrics.gd` | Autoload. JSONL to `user://run_*.jsonl`, path printed at startup. |
 | `check.gd` | Headless asserts. |

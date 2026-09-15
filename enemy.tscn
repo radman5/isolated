@@ -1,31 +1,13 @@
 [gd_scene format=3]
 
 [ext_resource type="Script" path="res://enemy.gd" id="1_enemy"]
+[ext_resource type="Script" path="res://character_view.gd" id="2_view"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/characters/Skeleton_Warrior.glb" id="3_model"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/weapons/Skeleton_Blade.gltf" id="4_blade"]
 
 [sub_resource type="CapsuleShape3D" id="sh_body"]
 radius = 0.5
 height = 2.0
-
-[sub_resource type="CapsuleMesh" id="me_body"]
-radius = 0.5
-height = 2.0
-
-[sub_resource type="StandardMaterial3D" id="mat_enemy"]
-albedo_color = Color(0.42, 0.3, 0.36, 1)
-
-[sub_resource type="BoxMesh" id="me_nose"]
-size = Vector3(0.2, 0.2, 0.4)
-
-[sub_resource type="BoxMesh" id="me_tell"]
-size = Vector3(1.7, 0.18, 1.4)
-
-[sub_resource type="StandardMaterial3D" id="mat_tell"]
-shading_mode = 0
-albedo_color = Color(1, 0.75, 0.1, 1)
-
-[sub_resource type="StandardMaterial3D" id="mat_hit"]
-shading_mode = 0
-albedo_color = Color(0.95, 0.2, 0.15, 1)
 
 [node name="Enemy" type="CharacterBody3D"]
 script = ExtResource("1_enemy")
@@ -33,22 +15,9 @@ script = ExtResource("1_enemy")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("sh_body")
 
-[node name="Body" type="MeshInstance3D" parent="."]
-mesh = SubResource("me_body")
-surface_material_override/0 = SubResource("mat_enemy")
-
-[node name="Nose" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, -0.6)
-mesh = SubResource("me_nose")
-
-[node name="Telegraph" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -1.2)
-visible = false
-mesh = SubResource("me_tell")
-surface_material_override/0 = SubResource("mat_tell")
-
-[node name="AttackBox" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -1.2)
-visible = false
-mesh = SubResource("me_tell")
-surface_material_override/0 = SubResource("mat_hit")
+[node name="Model" type="Node3D" parent="."]
+script = ExtResource("2_view")
+model = ExtResource("3_model")
+right_hand = ExtResource("4_blade")
+is_enemy = true
+walk_speed = 2.5

@@ -68,8 +68,6 @@ var _was_active := false
 var _knock := Vector3.ZERO
 
 @onready var player: Node = get_node_or_null("../Player")
-@onready var telegraph: MeshInstance3D = $Telegraph
-@onready var attack_box: MeshInstance3D = $AttackBox
 
 
 func _ready() -> void:
@@ -110,8 +108,6 @@ func _physics_process(delta: float) -> void:
 		cs.set(k, get(k))
 
 	if cs.dead():
-		telegraph.visible = false
-		attack_box.visible = false
 		_slide(delta, Vector3.ZERO)
 		return
 
@@ -133,9 +129,6 @@ func _physics_process(delta: float) -> void:
 	var ev := cs.advance(delta, want_attack, false)
 	if ev == "attack":
 		Metrics.log_event("enemy_attack", {"id": name, "dist": snappedf(dist, 0.1)})
-
-	telegraph.visible = cs.state == CombatState.WINDUP
-	attack_box.visible = cs.state == CombatState.ACTIVE
 
 	# One hit per swing, not one per frame.
 	var active_now := cs.state == CombatState.ACTIVE
