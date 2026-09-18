@@ -30,6 +30,13 @@ signal debug_event(kind: String, data: Dictionary)
 @export var ground_accel := 45.0
 @export var gravity := 24.0
 
+@export_group("Sneak")
+## Hold Shift. Slower, and enemies hear you at noise() x their hear_range.
+@export var sneak_move_mult := 0.45
+@export var sneak_noise := 0.2
+## A sleeping enemy's sight cone shrinks to this fraction while you sneak.
+@export var sneak_sight_mult := 0.6
+
 @export_group("Attack")
 @export var windup_time := 0.22
 @export var active_time := 0.10
@@ -175,6 +182,7 @@ var _hitstop_until := 0  # msec
 var _flights: Array = []  # arrows in the air: {node, dir, from, len, travelled, hits}
 var _ghosting := false  # passing through enemies: while dodging or chaining
 var _preview := ImmediateMesh.new()
+var sneaking := false
 var _hit_this_swing := {}  # instance ids already hit by the swing in progress
 var _knock := Vector3.ZERO
 # Each press gets an id, and a swing remembers the press that started it. Only
@@ -284,6 +292,7 @@ func _physics_process(delta: float) -> void:
 			cam.global_transform.basis
 		)
 
+	sneaking = Input.is_action_pressed("sneak")
 	var ev := cs.advance(delta, false, Input.is_action_just_pressed("dodge"), ss.drain())
 	if ev == "dodge":
 		# §7: dodge beats everything. It is the input most needed under pressure.
@@ -771,12 +780,21 @@ func _apply_hit() -> void:
 		Metrics.log_event("enemy_hit", {"id": e.name, "enemy_hp": snappedf(e.cs.health, 0.1)})
 
 
+# How loud you are: 0 standing still, sneak_noise sneaking, 1 walking.
+# Dodges, chains and knockback all count as walking.
+func noise() -> float:
+	if Vector2(velocity.x, velocity.z).length() < 0.5:
+		return 0.0
+	return sneak_noise if sneaking and cs.state != CombatState.DODGE and not chaining() else 1.0
+
+
 # Where a release would go, drawn on the ground. Sword: the chain path, bright
 # rings on locked-in links and a faint one on what another link would add. Bow:
 # each arrow's line to where it stops, with a ring on every enemy it hits, dimmer
 # after each pierce. Gameplay UI, so not behind the F1 debug toggle.
 func _aim_preview() -> void:
 	_preview.clear_surfaces()
+	_sense_preview()
 	if cs.charging():
 		var links := links_now()
 		var path := chain_targets(links + 1 if links < link_cap() else links)
@@ -809,6 +827,28 @@ func _aim_preview() -> void:
 				var a := pow(1.0 - pierce_falloff, n)
 				_ring(_ground(arrow.targets[n]), 0.55, 0.07, Color(0.35, 1.0, 0.45, 0.95 * a))
 		_preview.surface_end()
+
+
+# What each sleeping enemy can sense: its sight cone (shrinks while you sneak) and
+# a faint ring for how far it hears you right now. Gameplay UI, not debug.
+# ponytail: the cone ignores walls; the sight check does not. Clip it with rays
+# if players read the drawn cone as the truth and feel cheated.
+func _sense_preview() -> void:
+	var sleepers := get_tree().get_nodes_in_group("enemies").filter(
+		func(e): return e.has_method("awake") and not e.awake() and not e.cs.dead()
+	)
+	if sleepers.is_empty():
+		return
+	_preview.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	for e in sleepers:
+		var c := _ground(e)
+		var fwd: Vector3 = -e.get_global_transform_interpolated().basis.z
+		fwd.y = 0.0
+		_wedge(c, fwd.normalized(), e.sight_half_angle, e.sight_now(), Color(1.0, 0.95, 0.6, 0.45))
+		var hear: float = e.hear_range * noise()
+		if hear > 0.3:
+			_ring(c, hear, 0.03, Color(0.6, 0.8, 1.0, 0.35))
+	_preview.surface_end()
 
 
 # Outline of where a chain's first target can be.
@@ -854,6 +894,8 @@ func _move(delta: float, wish: Vector3) -> void:
 	# A plain swing never touches movement: wind-up, active and recovery all walk
 	# like idle. Only a dodge, a chain and a held charge override it.
 	var target := wish * move_speed * Stance.move_mult(ss.stance)
+	if sneaking:
+		target *= sneak_move_mult
 	var dashing := cs.state == CombatState.DODGE or chaining()
 	if cs.state == CombatState.DODGE:
 		target = dodge_dir * (dodge_distance / maxf(dodge_time, 0.01))

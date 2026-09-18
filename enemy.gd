@@ -21,9 +21,22 @@ const Hazard := preload("res://traps/hazard.gd")
 @export var turn_speed := 7.0
 @export var gravity := 24.0
 
-## Ignores the player until they come this close, then stays awake. Keeps the
-## stations in the environment demo from all waking at once.
-@export var aggro_range := 9.0
+@export_group("Awareness")
+# Asleep until one of these wakes it, then awake for good (Stage 5):
+#   sight  - player inside the cone, in line of sight
+#   heard  - player moving within hear_range (scaled by player.noise())
+#   hit    - any damage, from anyone or anything
+#   ally   - another enemy within alert_range woke up
+#   noise  - a loud event nearby (Enemy.noise(), e.g. a trap going off)
+## Degrees each side of facing.
+@export var sight_half_angle := 55.0
+@export var sight_range := 10.0
+## Walking footsteps carry this far. Sneaking shrinks it by player.noise().
+@export var hear_range := 9.0
+@export var alert_range := 7.0
+## A sleeping guard looks side to side by this many degrees. 0 = stares ahead.
+@export var look_sweep := 0.0
+@export var look_period := 5.0
 
 @export_group("Attack")
 @export var windup_time := 0.60  # the telegraph. If you cannot react, raise it.
@@ -75,6 +88,8 @@ const TUNABLES := [
 
 var cs := CombatState.new()
 var _awake := false
+var _base_yaw := 0.0
+var _look_t := 0.0
 var _swing_used := false
 var _was_active := false
 var _knock := Vector3.ZERO
@@ -87,6 +102,51 @@ func _ready() -> void:
 	cs.health_max = health_max
 	cs.health = health_max
 	cs.stamina = 100.0
+	_base_yaw = rotation.y
+
+
+func awake() -> bool:
+	return _awake
+
+
+# Idempotent, so allies waking each other cannot loop.
+func wake(why: String) -> void:
+	if _awake or cs.dead():
+		return
+	_awake = true
+	Metrics.log_event("enemy_alerted", {"id": name, "why": why})
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if e != self and e.global_position.distance_to(global_position) <= alert_range:
+			e.wake("ally")
+
+
+# A loud event at `at`: wakes every sleeper within `radius`.
+static func noise(tree: SceneTree, at: Vector3, radius: float, why := "noise") -> void:
+	for e in tree.get_nodes_in_group("enemies"):
+		if e.global_position.distance_to(at) <= radius:
+			e.wake(why)
+
+
+# How far the cone reaches right now: a sneaking player is harder to spot.
+func sight_now() -> float:
+	return sight_range * (player.sneak_sight_mult if player and player.sneaking else 1.0)
+
+
+func _senses(to_player: Vector3, dist: float) -> String:
+	if dist <= hear_range * player.noise():
+		return "heard"
+	if dist > sight_now():
+		return ""
+	var fwd := -global_transform.basis.z
+	if rad_to_deg(fwd.angle_to(to_player)) > sight_half_angle:
+		return ""
+	# ponytail: one ray, eye to chest. Peeking round a corner with half your body
+	# still counts as hidden; add more rays if that ever feels unfair.
+	var q := PhysicsRayQueryParameters3D.create(
+		global_position + Vector3(0, 0.6, 0), player.global_position + Vector3(0, 0.3, 0)
+	)
+	q.exclude = [get_rid(), player.get_rid()]
+	return "sight" if get_world_3d().direct_space_state.intersect_ray(q).is_empty() else ""
 
 
 # `knock` is a displacement in metres, not a velocity. The hit interrupts
@@ -97,6 +157,7 @@ func _ready() -> void:
 func take_hit(damage_: float, stagger_secs: float, knock := Vector3.ZERO, ignore_armor := false) -> void:
 	if cs.dead():
 		return
+	wake("hit")
 	damage_ *= damage_taken_mult
 	stagger_secs *= stagger_taken_mult
 	knock *= knock_taken_mult
@@ -117,6 +178,7 @@ func take_hit(damage_: float, stagger_secs: float, knock := Vector3.ZERO, ignore
 func env_kill(how: String) -> void:
 	if cs.dead():
 		return
+	wake("hit")
 	cs.health = 0.0
 	Metrics.log_event("enemy_killed_by_env", {"id": name, "how": how})
 	if how == "fall":
@@ -127,6 +189,7 @@ func env_kill(how: String) -> void:
 func env_damage(amount: float) -> void:
 	if cs.dead():
 		return
+	wake("hit")
 	cs.health = maxf(0.0, cs.health - amount)
 	if cs.dead():
 		Metrics.log_event("enemy_killed_by_env", {"id": name, "how": "burn"})
@@ -168,10 +231,14 @@ func _physics_process(delta: float) -> void:
 		to_player.y = 0.0
 		dist = to_player.length()
 	if not _awake:
-		if dist > aggro_range:
+		var why := _senses(to_player, dist) if dist < INF else ""
+		if why == "":
+			if look_sweep > 0.0:
+				_look_t += delta
+				rotation.y = _base_yaw + deg_to_rad(look_sweep) * sin(TAU * _look_t / look_period)
 			_slide(delta, Vector3.ZERO)
 			return
-		_awake = true
+		wake(why)
 
 	# Attack only from IDLE, only in range, only roughly facing. Everything else
 	# about the swing is CombatState's problem.

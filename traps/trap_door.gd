@@ -9,6 +9,10 @@ extends Node3D
 # The rope is a "shootable": player.gd's arrows find it through that group and
 # call shot() when the flying arrow reaches it.
 
+const Enemy := preload("res://enemy.gd")
+
+## Sleeping enemies this close wake when it goes off.
+@export var noise_radius := 14.0
 @export var size := Vector2(3.0, 3.0)
 ## Where the rope's post stands, relative to the door's centre.
 @export var post_offset := Vector3(2.4, 0.0, 0.0)
@@ -74,6 +78,7 @@ func shot() -> void:
 	_spent = true
 	_rope.hide()
 	Metrics.log_event("trap_triggered", {})
+	Enemy.noise(get_tree(), global_position, noise_radius)
 	var tw := create_tween()
 	tw.tween_property(_door_pivot, "rotation:z", deg_to_rad(-95.0), 0.18)
 	tw.tween_callback(_set_open.bind(true))

@@ -8,7 +8,7 @@ const Zone := preload("res://traps/hazard_zone.gd")
 @export var slow_mult := 0.55
 @export var shoot_radius := 0.7
 
-var _jar := MeshInstance3D.new()
+var _jar: MeshInstance3D
 var _spent := false
 
 

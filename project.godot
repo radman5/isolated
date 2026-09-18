@@ -62,6 +62,11 @@ attack={
 , Object(InputEventJoypadButton,"button_index":10)
 ]
 }
+sneak={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":4194325)
+]
+}
 dodge={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"physical_keycode":32)

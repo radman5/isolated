@@ -37,6 +37,8 @@ var _hp_bar := ProgressBar.new()
 var _down := 0
 
 @onready var player: Node = $Player
+## Optional. Reaching it ends the fight: "sneaked" if nothing woke, else "escaped".
+@onready var _exit: Node3D = get_node_or_null("Exit")
 
 
 func _ready() -> void:
@@ -45,6 +47,8 @@ func _ready() -> void:
 		e.name = "Enemy%d" % (i + 1)
 		e.position = SLOTS[i] + Vector3(0, 1.05, 0)
 		add_child(e)
+		# The arena is a straight fight: no sneaking up on anyone.
+		e.wake("arena")
 	_build_controls()
 	_t0 = _now()
 	Metrics.log_event("fight_start", {
@@ -71,6 +75,8 @@ func _process(delta: float) -> void:
 		winner = "player"
 	elif player.cs.dead():
 		winner = "enemy"
+	elif _exit and Vector2(player.global_position.x - _exit.global_position.x, player.global_position.z - _exit.global_position.z).length() < 1.5:
+		winner = "escaped" if enemies.any(func(e): return e.awake()) else "sneaked"
 	if winner == "":
 		return
 
@@ -80,12 +86,13 @@ func _process(delta: float) -> void:
 		"fight_end",
 		{
 			"winner": winner,
-			"enemies": enemy_count,
+			"enemies": enemies.size(),
 			# The §5 headline number: time to clear every enemy.
 			"time_to_kill": snappedf(_now() - _t0, 0.01),
 			"player_hp_left": snappedf(player.cs.health, 0.1),
 			# On a death, the corridor position it happened at is cleared + 1.
 			"cleared": _down,
+			"alerted": enemies.filter(func(e): return e.awake()).size(),
 		}
 	)
 

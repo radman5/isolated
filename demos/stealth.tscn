@@ -1,0 +1,270 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://player.gd" id="player"]
+[ext_resource type="Script" path="res://debug_hud.gd" id="hud"]
+[ext_resource type="Script" path="res://fight.gd" id="fight"]
+[ext_resource type="Script" path="res://debug_draw.gd" id="debug"]
+[ext_resource type="Script" path="res://follow_camera.gd" id="camera"]
+[ext_resource type="Script" path="res://character_view.gd" id="view"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/characters/Ranger.glb" id="ranger"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/weapons/sword_1handed.gltf" id="sword"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/weapons/bow_withString.gltf" id="bow"]
+[ext_resource type="PackedScene" path="res://enemy.tscn" id="skel"]
+[ext_resource type="Script" path="res://traps/hanging_weight.gd" id="weight"]
+
+[sub_resource type="Environment" id="env"]
+background_mode = 1
+background_color = Color(0.05, 0.06, 0.08, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.42, 0.45, 0.52, 1)
+ambient_light_energy = 1.0
+
+[sub_resource type="StandardMaterial3D" id="mat_ground"]
+albedo_color = Color(0.22, 0.23, 0.25, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_wall"]
+albedo_color = Color(0.32, 0.33, 0.36, 1)
+
+[sub_resource type="CapsuleShape3D" id="sh_player"]
+radius = 0.5
+height = 2.0
+
+[sub_resource type="BoxShape3D" id="sh_16_1_40"]
+size = Vector3(16, 1, 40)
+
+[sub_resource type="BoxMesh" id="me_16_1_40"]
+size = Vector3(16, 1, 40)
+
+[sub_resource type="BoxShape3D" id="sh_0p5_1p6_40"]
+size = Vector3(0.5, 1.6, 40)
+
+[sub_resource type="BoxMesh" id="me_0p5_1p6_40"]
+size = Vector3(0.5, 1.6, 40)
+
+[sub_resource type="BoxShape3D" id="sh_17_1p6_0p5"]
+size = Vector3(17, 1.6, 0.5)
+
+[sub_resource type="BoxMesh" id="me_17_1p6_0p5"]
+size = Vector3(17, 1.6, 0.5)
+
+[sub_resource type="BoxShape3D" id="sh_2_1p8_2"]
+size = Vector3(2, 1.8, 2)
+
+[sub_resource type="BoxMesh" id="me_2_1p8_2"]
+size = Vector3(2, 1.8, 2)
+
+[sub_resource type="BoxShape3D" id="sh_1p5_1p8_3"]
+size = Vector3(1.5, 1.8, 3)
+
+[sub_resource type="BoxMesh" id="me_1p5_1p8_3"]
+size = Vector3(1.5, 1.8, 3)
+
+[sub_resource type="BoxShape3D" id="sh_2_1p8_4"]
+size = Vector3(2, 1.8, 4)
+
+[sub_resource type="BoxMesh" id="me_2_1p8_4"]
+size = Vector3(2, 1.8, 4)
+
+[sub_resource type="BoxShape3D" id="sh_3_1p8_1p5"]
+size = Vector3(3, 1.8, 1.5)
+
+[sub_resource type="BoxMesh" id="me_3_1p8_1p5"]
+size = Vector3(3, 1.8, 1.5)
+
+[sub_resource type="BoxShape3D" id="sh_1p5_1p8_2p5"]
+size = Vector3(1.5, 1.8, 2.5)
+
+[sub_resource type="BoxMesh" id="me_1p5_1p8_2p5"]
+size = Vector3(1.5, 1.8, 2.5)
+
+[sub_resource type="TorusMesh" id="me_exit"]
+inner_radius = 1.3
+outer_radius = 1.5
+
+[sub_resource type="StandardMaterial3D" id="mat_exit"]
+shading_mode = 0
+albedo_color = Color(0.35, 1, 0.45, 1)
+
+[node name="Stealth" type="Node3D"]
+script = ExtResource("fight")
+spawn_enemies = false
+stage = "5"
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("env")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.7808688, 0.50901514, -0.362143, 0, 0.5797117, 0.8148217, 0.6246951, -0.63626885, 0.45267874, 0, 6, 0)
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(0.75927126, -0.49852195, 0.4183096, 0, 0.6427876, 0.76604444, -0.6507742, -0.58163553, 0.4880502, 5.22887, 10.575556, 6.1006274)
+fov = 50.0
+script = ExtResource("camera")
+
+[node name="Floor" type="StaticBody3D" parent="."]
+position = Vector3(0, -0.5, -16)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Floor"]
+shape = SubResource("sh_16_1_40")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Floor"]
+mesh = SubResource("me_16_1_40")
+surface_material_override/0 = SubResource("mat_ground")
+
+[node name="WallWest" type="StaticBody3D" parent="."]
+position = Vector3(-8.25, 0.8, -16)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="WallWest"]
+shape = SubResource("sh_0p5_1p6_40")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WallWest"]
+mesh = SubResource("me_0p5_1p6_40")
+surface_material_override/0 = SubResource("mat_wall")
+
+[node name="WallEast" type="StaticBody3D" parent="."]
+position = Vector3(8.25, 0.8, -16)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="WallEast"]
+shape = SubResource("sh_0p5_1p6_40")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WallEast"]
+mesh = SubResource("me_0p5_1p6_40")
+surface_material_override/0 = SubResource("mat_wall")
+
+[node name="WallStart" type="StaticBody3D" parent="."]
+position = Vector3(0, 0.8, 4.25)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="WallStart"]
+shape = SubResource("sh_17_1p6_0p5")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WallStart"]
+mesh = SubResource("me_17_1p6_0p5")
+surface_material_override/0 = SubResource("mat_wall")
+
+[node name="WallEnd" type="StaticBody3D" parent="."]
+position = Vector3(0, 0.8, -36.25)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="WallEnd"]
+shape = SubResource("sh_17_1p6_0p5")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="WallEnd"]
+mesh = SubResource("me_17_1p6_0p5")
+surface_material_override/0 = SubResource("mat_wall")
+
+[node name="Crate1" type="StaticBody3D" parent="."]
+position = Vector3(-4.5, 0.9, -7)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Crate1"]
+shape = SubResource("sh_2_1p8_2")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Crate1"]
+mesh = SubResource("me_2_1p8_2")
+surface_material_override/0 = SubResource("mat_wall")
+
+[node name="Crate2" type="StaticBody3D" parent="."]
+position = Vector3(3.5, 0.9, -9)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Crate2"]
+shape = SubResource("sh_1p5_1p8_3")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Crate2"]
+mesh = SubResource("me_1p5_1p8_3")
+surface_material_override/0 = SubResource("mat_wall")
+
+[node name="Crate3" type="StaticBody3D" parent="."]
+position = Vector3(-6, 0.9, -17)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Crate3"]
+shape = SubResource("sh_2_1p8_4")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Crate3"]
+mesh = SubResource("me_2_1p8_4")
+surface_material_override/0 = SubResource("mat_wall")
+
+[node name="Crate4" type="StaticBody3D" parent="."]
+position = Vector3(4.5, 0.9, -19)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Crate4"]
+shape = SubResource("sh_2_1p8_2")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Crate4"]
+mesh = SubResource("me_2_1p8_2")
+surface_material_override/0 = SubResource("mat_wall")
+
+[node name="Crate5" type="StaticBody3D" parent="."]
+position = Vector3(2, 0.9, -27)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Crate5"]
+shape = SubResource("sh_3_1p8_1p5")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Crate5"]
+mesh = SubResource("me_3_1p8_1p5")
+surface_material_override/0 = SubResource("mat_wall")
+
+[node name="Crate6" type="StaticBody3D" parent="."]
+position = Vector3(-5.5, 0.9, -29)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Crate6"]
+shape = SubResource("sh_1p5_1p8_2p5")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Crate6"]
+mesh = SubResource("me_1p5_1p8_2p5")
+surface_material_override/0 = SubResource("mat_wall")
+
+[node name="Guard1" parent="." instance=ExtResource("skel")]
+position = Vector3(0, 1.05, -13)
+rotation = Vector3(0, 3.141592653589793, 0)
+look_sweep = 50.0
+
+[node name="PairA" parent="." instance=ExtResource("skel")]
+position = Vector3(-2.6, 1.05, -23)
+rotation = Vector3(0, -1.5707963267948966, 0)
+
+[node name="PairB" parent="." instance=ExtResource("skel")]
+position = Vector3(-0.9, 1.05, -23)
+rotation = Vector3(0, 1.5707963267948966, 0)
+
+[node name="ExitGuard" parent="." instance=ExtResource("skel")]
+position = Vector3(4.5, 1.05, -31)
+rotation = Vector3(0, 1.5707963267948966, 0)
+look_sweep = 60.0
+
+[node name="Weight" type="Node3D" parent="."]
+position = Vector3(-1.75, 0, -23)
+script = ExtResource("weight")
+
+[node name="Exit" type="Node3D" parent="."]
+position = Vector3(0, 0, -34)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Exit"]
+position = Vector3(0, 0.05, 0)
+mesh = SubResource("me_exit")
+surface_material_override/0 = SubResource("mat_exit")
+
+[node name="Player" type="CharacterBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 2)
+script = ExtResource("player")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
+shape = SubResource("sh_player")
+
+[node name="Model" type="Node3D" parent="Player"]
+script = ExtResource("view")
+model = ExtResource("ranger")
+right_hand = ExtResource("sword")
+left_hand = ExtResource("bow")
+left_hand_rotation = Vector3(0, 0, 180)
+
+[node name="DebugDraw" type="Node3D" parent="."]
+script = ExtResource("debug")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Label" type="Label" parent="HUD"]
+offset_left = 12.0
+offset_top = 8.0
+offset_right = 520.0
+offset_bottom = 420.0
+script = ExtResource("hud")
+player_path = NodePath("../../Player")

@@ -13,6 +13,7 @@ Godot **4.7.2 mono** — `/Users/wesleychase/Downloads/Godot_mono.app`.
 GODOT=/Users/wesleychase/Downloads/Godot_mono.app/Contents/MacOS/Godot
 
 $GODOT --headless --path . --script res://check.gd   # logic check, prints OK
+$GODOT --headless --path . res://stealth_check.tscn  # stage 5 wake rules, prints STEALTH OK
 $GODOT --editor --path .                             # then F5
 ```
 
@@ -29,7 +30,7 @@ scene dropped there. `Backspace` brings the menu back.
 
 ## Controls
 
-`WASD` move · `Space` dodge · **hold RMB** block · `1`/`2` sword/bow ·
+`WASD` move · **hold `Shift`** sneak · `Space` dodge · **hold RMB** block · `1`/`2` sword/bow ·
 `-`/`=` enemy count · `[`/`]` arrow count · `F1` debug · `Esc` free the cursor · `R` restart.
 Facing follows the mouse.
 
@@ -194,19 +195,51 @@ Collision comes back once you are clear of every enemy's capsule. I-frames are
 unchanged (0.05–0.28s of the 0.40s roll): passing through isn't the same as being
 untouchable.
 
+## Stage 5 — sneaking (`demos/stealth.tscn`)
+
+Get from the start to the green ring at the far end. Four skeletons stand guard:
+Guard1 sweeps its gaze over the first half, a pair faces each other under a hanging
+weight, and ExitGuard sweeps over the exit. Crates (1.8m, taller than a skeleton's eye)
+block sight. Reaching the ring ends the run: `winner` is **`sneaked`** if nothing woke,
+**`escaped`** if something did. Fighting them all still counts as a win.
+
+**Sneak:** hold `Shift`. 45% speed (`sneak_move_mult`).
+
+A sleeping enemy stands still (or sweeps by `look_sweep`) until one of these wakes it,
+and then stays awake. Every wake logs `enemy_alerted` with `why`:
+
+| `why` | Rule |
+|---|---|
+| `sight` | You're inside its cone (`sight_half_angle` 55°, `sight_range` 10m) with a clear line from its eye to your chest. Sneaking shrinks the range to 60% (`sneak_sight_mult`). |
+| `heard` | You're moving within `hear_range` (9m) × your `noise()`: 1 walking, 0.2 sneaking (`sneak_noise`), 0 standing still. Dodges and chains are never quiet. |
+| `hit` | Any damage: sword, arrow, fire, a fall. |
+| `ally` | Another enemy within `alert_range` (7m) woke up. It chains. |
+| `noise` | The trap door, hanging weight and gate wake everything within their `noise_radius` (14m). Dropping the weight on the pair is two kills, but it wakes the exit guard too. |
+
+The **cone** (yellow wedge) and **hearing ring** (blue) are drawn under each sleeping
+enemy, and both shrink live as you sneak or stop. The drawn cone ignores walls; the real
+check doesn't, so a crate can hide you inside a drawn cone.
+
+Enemies spawned by the arena's `-`/`+` start awake, so the arena plays as before. In the
+other demos, walking wakes a station at 9m, the same as the old `aggro_range`, but now
+you can sneak up on it. `fight_end` gains `alerted`: how many enemies were awake.
+
+Skipped: a sneak-attack bonus, suspicion or investigate states (it's asleep or awake,
+nothing between), patrol routes, and going back to sleep.
+
 ## Stage 3 — attrition corridor (`demos/corridor.tscn`)
 
-Three Skeleton Warriors, 18m apart down a walled 6m-wide corridor. **No healing** between
+Three pairs of Skeleton Warriors, 18m apart down a walled 6m-wide corridor. **No healing** between
 them; the red bar bottom-left is your health. Each one stays asleep until you are within
-`aggro_range` (9m), so they come one at a time. Die or clear all three and it restarts at full.
+`aggro_range` (9m), so each pair comes as its own fight. Corridor skeletons only: `damage` 35 (arena 25) and `windup_time` 0.45 (arena 0.6). Die or clear all three and it restarts at full.
 
 The question (test plan §4): does the third fight feel different from the first *only
 because you arrive hurt*? Each kill logs `enemy_down` with `player_hp`, and `fight_end`
-carries `cleared`, so a death happened at corridor position `cleared + 1`.
+carries `cleared`, counting single skeletons (0–6), so a death happened at pair `cleared / 2 + 1`, rounded down.
 
 ## Stage 4 — trap door (`demos/trap_door.tscn`)
 
-Stage 3 (the attrition corridor) was skipped by choice. This demo tests the Stage 4
+This demo tests the Stage 4
 question: can you win a fight you'd lose head-on by using the room?
 
 - **The Heavy** (`heavy_enemy.tscn`, the KayKit Knight with axe and shield) takes 5% damage
@@ -346,9 +379,10 @@ Starting numbers. Record where you actually land; that record is the deliverable
 
 - **Stage 1:** moving and swinging at nothing feels responsive.
 - **Stage 2:** you fight the enemy ten times in a row without forcing yourself.
+- **Stage 3 — decided:** health never regenerates on its own; only stamina does. Healing
+  will come from consumables, magic or companions (not built in this prototype).
 
-Not built yet: the corridor (stage 3), hazard (4), stealth (5), jump/traversal,
-hit VFX, health bars. Parry exists but ships off (`parry_enabled`) until block
+Not built yet: jump/traversal, hit VFX, healing. Parry exists but ships off (`parry_enabled`) until block
 feels right.
 
 ## Logs

@@ -22,7 +22,7 @@ const Hazard := preload("res://traps/hazard.gd")
 @export var flammable := false
 @export var colour := Color(0.35, 0.26, 0.15, 0.9)
 
-var _mesh := MeshInstance3D.new()
+var _mesh: MeshInstance3D
 var _age := 0.0
 
 

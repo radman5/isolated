@@ -2,13 +2,16 @@ extends Node3D
 # A block hung from a beam. Cut the rope and it drops on the circle below,
 # crushing whatever stands there. One use.
 
+const Enemy := preload("res://enemy.gd")
 const Hazard := preload("res://traps/hazard.gd")
 
+## Sleeping enemies this close wake when it goes off.
+@export var noise_radius := 14.0
 @export var drop_radius := 1.6
 @export var hang_height := 5.0
 @export var shoot_radius := 0.6
 
-var _weight := MeshInstance3D.new()
+var _weight: MeshInstance3D
 var _rope := MeshInstance3D.new()
 var _spent := false
 
@@ -61,6 +64,7 @@ func shot() -> void:
 	_spent = true
 	_rope.hide()
 	Metrics.log_event("weight_dropped", {})
+	Enemy.noise(get_tree(), global_position, noise_radius)
 	var tw := create_tween()
 	tw.tween_property(_weight, "position:y", 0.7, 0.35).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
 	tw.tween_callback(_crush)

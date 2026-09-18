@@ -5,6 +5,10 @@ extends Node3D
 # ponytail: closing on top of a body just lets physics shove it out. Crushing
 # would need a swept check for one gate.
 
+const Enemy := preload("res://enemy.gd")
+
+## Sleeping enemies this close wake when it goes off.
+@export var noise_radius := 14.0
 @export var width := 4.0
 @export var height := 3.0
 @export var closed := false
@@ -58,5 +62,6 @@ func shoot_position() -> Vector3:
 func shot() -> void:
 	closed = not closed
 	Metrics.log_event("gate_toggled", {"closed": closed})
+	Enemy.noise(get_tree(), global_position, noise_radius)
 	var tw := create_tween()
 	tw.tween_property(_gate, "position:y", _closed_y() if closed else _open_y(), 0.35)
