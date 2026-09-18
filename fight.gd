@@ -33,6 +33,8 @@ var _t0 := 0.0
 var _over := false
 var _reset_in := 0.0
 var _arrow_label := Label.new()
+var _hp_bar := ProgressBar.new()
+var _down := 0
 
 @onready var player: Node = $Player
 
@@ -57,7 +59,13 @@ func _process(delta: float) -> void:
 			get_tree().reload_current_scene()
 		return
 
+	_hp_bar.value = player.cs.health
 	var enemies := get_tree().get_nodes_in_group("enemies")
+	# Stage 3: the health you carry into each next fight is the whole experiment.
+	var down := enemies.filter(func(e): return e.cs.dead()).size()
+	if down > _down:
+		_down = down
+		Metrics.log_event("enemy_down", {"cleared": down, "player_hp": snappedf(player.cs.health, 0.1)})
 	var winner := ""
 	if not enemies.is_empty() and enemies.all(func(e): return e.cs.dead()):
 		winner = "player"
@@ -76,6 +84,8 @@ func _process(delta: float) -> void:
 			# The §5 headline number: time to clear every enemy.
 			"time_to_kill": snappedf(_now() - _t0, 0.01),
 			"player_hp_left": snappedf(player.cs.health, 0.1),
+			# On a death, the corridor position it happened at is cleared + 1.
+			"cleared": _down,
 		}
 	)
 
@@ -123,13 +133,24 @@ func _build_controls() -> void:
 	rows.offset_left = -260.0
 	rows.offset_right = -12.0
 	rows.offset_top = 8.0
-	var enemy_label := Label.new()
-	enemy_label.text = "  enemies %d  " % enemy_count
 	if spawn_enemies:
+		var enemy_label := Label.new()
+		enemy_label.text = "  enemies %d  " % enemy_count
 		rows.add_child(_row(enemy_label, _change_enemies))
 	_arrow_label.text = "  arrows %d  " % player.arrow_count
 	rows.add_child(_row(_arrow_label, _change_arrows))
 	$HUD.add_child(rows)
+	# ponytail: stock ProgressBar. §3 rules out an attractive one; this one is for reading.
+	_hp_bar.max_value = player.cs.health_max
+	_hp_bar.show_percentage = false
+	_hp_bar.modulate = Color(0.9, 0.25, 0.2)
+	_hp_bar.anchor_top = 1.0
+	_hp_bar.anchor_bottom = 1.0
+	_hp_bar.offset_left = 12.0
+	_hp_bar.offset_right = 312.0
+	_hp_bar.offset_top = -36.0
+	_hp_bar.offset_bottom = -12.0
+	$HUD.add_child(_hp_bar)
 
 
 func _row(label: Label, change: Callable) -> HBoxContainer:

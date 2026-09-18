@@ -194,6 +194,16 @@ Collision comes back once you are clear of every enemy's capsule. I-frames are
 unchanged (0.05–0.28s of the 0.40s roll): passing through isn't the same as being
 untouchable.
 
+## Stage 3 — attrition corridor (`demos/corridor.tscn`)
+
+Three Skeleton Warriors, 18m apart down a walled 6m-wide corridor. **No healing** between
+them; the red bar bottom-left is your health. Each one stays asleep until you are within
+`aggro_range` (9m), so they come one at a time. Die or clear all three and it restarts at full.
+
+The question (test plan §4): does the third fight feel different from the first *only
+because you arrive hurt*? Each kill logs `enemy_down` with `player_hp`, and `fight_end`
+carries `cleared`, so a death happened at corridor position `cleared + 1`.
+
 ## Stage 4 — trap door (`demos/trap_door.tscn`)
 
 Stage 3 (the attrition corridor) was skipped by choice. This demo tests the Stage 4

@@ -155,6 +155,9 @@ func _physics_process(delta: float) -> void:
 		cs.set(k, get(k))
 
 	if cs.dead():
+		# ponytail: a corpse stops blocking the moment it dies, whatever killed it.
+		# The mask stays, so it still rests on the floor instead of sinking.
+		collision_layer = 0
 		_slide(delta, Vector3.ZERO)
 		return
 

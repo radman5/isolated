@@ -159,6 +159,13 @@ func _requested_line(pos: Vector3) -> void:
 func _draw_enemy(e: Node, delta: float) -> void:
 	var cs = e.cs
 	var id := e.get_instance_id()
+	if cs.dead():
+		# Nothing left to debug: rings, ghost and label go with the corpse.
+		_e_ghosts.erase(id)
+		if _e_labels.has(id):
+			_e_labels[id].queue_free()
+			_e_labels.erase(id)
+		return
 	var pos := _ipos(e)
 	var target: Array = [_ipos(_p)] if _p else []
 	var yaw: float = e.rotation.y
@@ -175,8 +182,7 @@ func _draw_enemy(e: Node, delta: float) -> void:
 			_e_ghosts[id] = {"pos": pos, "yaw": yaw, "arc": e.attack_arc, "reach": e.attack_range, "age": 0.0}
 			_swing_fan(pos, yaw, e.attack_arc, e.attack_range, RED, 0.5, target)
 		_:
-			if not cs.dead():
-				_swing_fan(pos, yaw, e.attack_arc, e.attack_range, GREY, 0.0, target, 0.35)
+			_swing_fan(pos, yaw, e.attack_arc, e.attack_range, GREY, 0.0, target, 0.35)
 	if cs.state != CombatState.ACTIVE and _e_ghosts.has(id):
 		_ghost(_e_ghosts[id], delta)
 
@@ -192,7 +198,7 @@ func _draw_enemy(e: Node, delta: float) -> void:
 	if cs.state == CombatState.RECOVERY or cs.state == CombatState.STAGGER:
 		punish = "\n>> PUNISH <<"
 	label.text = "%s · %s%s\nhp %.0f  st %.0f%s" % [
-		e.name, "dead" if cs.dead() else cs.state_name(), _timer(cs), cs.health, cs.stamina, punish,
+		e.name, cs.state_name(), _timer(cs), cs.health, cs.stamina, punish,
 	]
 
 
