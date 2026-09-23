@@ -24,6 +24,18 @@ The rule that health never regenerates on its own, so what one fight costs you, 
 A section of a route built to be sneaked through, past monsters too strong to fight. If you're caught, you flee rather than fight.
 _Avoid_: stealth level, stealth section
 
+**Barkling**:
+The small, weak beetle-like monster of Route 1's fights, armoured in bark and able to pass for a mossy stump until you come close.
+_Avoid_: bug, critter, grunt
+
+**Rootkin**:
+The upright, mantis-like monster that sleeps in Route 1's nest. Much stronger than a barkling: one is a hard fight, and several will kill you.
+_Avoid_: treant, mantis, sentinel
+
+**Nest**:
+A group of the same monster asleep together in a stealth stretch. Waking one wakes them all, and their danger is their numbers, not any one of them.
+_Avoid_: lair, den, spawn
+
 **Kit**:
 The weapons and skills the player has at a given point in the game. It grows as the game goes on, through gifts, recruits and settlement NPCs. On Route 1 the kit is the sword and the dodge.
 _Avoid_: loadout, skills, abilities
