@@ -207,6 +207,21 @@ var rain_ready_in := 0.0
 var rain_target := Vector3.ZERO  # centre of the rain circle; trails the cursor
 var _rain_hold := 0.0  # seconds the rain has been held
 var _rng := RandomNumberGenerator.new()
+
+# PROTOTYPE, throwaway (branch prototype/pad-chain-aim): right-stick aim for the
+# charged chain. The pad drives a virtual cursor that _cursor_point returns, so
+# the chain wedge, target pick and facing all work unchanged. F3 or LB cycles.
+const PAD_VARIANTS := [
+	"A  stick = direction + distance (tilt further = further target)",
+	"B  stick = direction, auto-snaps to the nearest enemy in that wedge",
+	"C  stick drives a reticle, like a slow mouse",
+]
+static var pad_variant := 0
+var pad_active := false  # true after pad input, false again on mouse motion
+var _pad_point := Vector3.ZERO
+var _pad_dir := Vector3.FORWARD
+var _pad_reach := 3.0
+var _pad_off := Vector3(0, 0, -3)  # variant C: reticle offset from the player
 # Index of the link being dashed to; -1 for a plain swing. Read by character_view
 # to restart the slash on each link.
 var link_i := -1
@@ -270,6 +285,10 @@ func _process(_delta: float) -> void:
 # the frame the threshold is crossed. CombatState is pure, so firing it outside
 # the physics step just sets state/t and the next step advances it.
 func _input(event: InputEvent) -> void:
+	if event is InputEventJoypadButton or (event is InputEventJoypadMotion and absf(event.axis_value) > 0.3):
+		pad_active = true
+	elif event is InputEventMouseMotion and event.relative.length() > 3.0:
+		pad_active = false
 	if not (event is InputEventMouseMotion):
 		return
 	# Motion is only a gesture for parry now: the sword is clicked, and a charge
@@ -285,6 +304,10 @@ func _input(event: InputEvent) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	elif (event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_F3) \
+			or (event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_LEFT_SHOULDER):
+		pad_variant = (pad_variant + 1) % PAD_VARIANTS.size()
+		Metrics.log_event("pad_variant", {"variant": pad_variant})
 	elif event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_F2:
 		Fx.on = not Fx.on
 		Metrics.log_event("fx_toggled", {"on": Fx.on})
@@ -310,6 +333,7 @@ func _physics_process(delta: float) -> void:
 	g.refractory = flick_refractory
 
 	g.tick(delta)
+	_update_pad(delta)
 	_reject_cool = maxf(0.0, _reject_cool - delta)
 	chain_ready_in = maxf(0.0, chain_ready_in - delta)
 	volley_ready_in = maxf(0.0, volley_ready_in - delta)
@@ -875,8 +899,48 @@ func _aim(delta: float, cam: Camera3D) -> void:
 		rotation.y = rotate_toward(rotation.y, yaw, deg_to_rad(rate) * delta)
 
 
+# PROTOTYPE: move the pad's virtual cursor for the current variant.
+func _update_pad(delta: float) -> void:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	var stick := Vector2(Input.get_joy_axis(0, JOY_AXIS_RIGHT_X), Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y))
+	if stick.length() < 0.25:
+		stick = Vector2.ZERO
+	var cb := cam.global_transform.basis
+	var dir := CameraRelative.project(stick, cb).normalized() if stick != Vector2.ZERO else Vector3.ZERO
+	if dir == Vector3.ZERO:
+		# Twin-stick habit: no aim input means aim where you're walking.
+		var move := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+		if move.length() > 0.25 and pad_variant != 2:
+			_pad_dir = CameraRelative.project(move, cb).normalized()
+	else:
+		_pad_dir = dir
+	match pad_variant:
+		0:
+			if stick != Vector2.ZERO:
+				_pad_reach = chain_first_range * clampf(stick.length(), 0.25, 1.0)
+			_pad_point = global_position + _pad_dir * _pad_reach
+		1:
+			_pad_point = global_position + _pad_dir * 3.0
+			var best := INF
+			for e in enemies():
+				var d: float = e.global_position.distance_to(global_position)
+				if d < best and CombatState.in_arc(global_position, _pad_dir, e.global_position, chain_first_range, chain_first_arc):
+					best = d
+					_pad_point = e.global_position
+		2:
+			_pad_off += CameraRelative.project(stick, cb) * 10.0 * delta
+			_pad_off.y = 0.0
+			_pad_off = _pad_off.limit_length(chain_first_range + 2.0)
+			_pad_point = global_position + _pad_off
+	_pad_point.y = global_position.y
+
+
 # The ground point under the cursor, or null if there is none.
 func _cursor_point(cam: Camera3D) -> Variant:
+	if pad_active:
+		return _pad_point
 	if cam == null:
 		return null
 	var m := get_viewport().get_mouse_position()
@@ -944,6 +1008,10 @@ func noise() -> float:
 func _aim_preview() -> void:
 	_preview.clear_surfaces()
 	_sense_preview()
+	if pad_active:
+		_preview.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+		_ring(Vector3(_pad_point.x, 0.05, _pad_point.z), 0.35, 0.06, Color(0.4, 0.8, 1.0, 0.9))
+		_preview.surface_end()
 	if cs.charging():
 		var links := links_now()
 		var path := chain_targets(links + 1 if links < link_cap() else links)
