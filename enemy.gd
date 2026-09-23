@@ -43,6 +43,12 @@ const Hazard := preload("res://traps/hazard.gd")
 @export var disguised := false
 @export var unfold_distance := 4.0
 @export var unfold_time := 0.6
+## Nest name. Waking any enemy wakes every other enemy with the same nest,
+## however far apart they are.
+@export var nest := ""
+## The stealth stretch it guards (stealth_stretch.gd). Once awake it chases only
+## while you're inside; past the edge it walks home and falls asleep again.
+@export var stretch_path: NodePath
 
 @export_group("Attack")
 @export var windup_time := 0.60  # the telegraph. If you cannot react, raise it.
@@ -106,6 +112,8 @@ var _slow_from := 0  # msec, wall clock
 var _slow_until := 0
 var _slow_scale := 1.0
 var _unfold_left := 0.0
+var _home := Vector3.ZERO
+var _stretch: Node3D
 
 @onready var player: Node = get_node_or_null("../Player")
 
@@ -116,6 +124,8 @@ func _ready() -> void:
 	cs.health = health_max
 	cs.stamina = 100.0
 	_base_yaw = rotation.y
+	_home = global_position
+	_stretch = get_node_or_null(stretch_path) if not stretch_path.is_empty() else null
 	_show_disguise(disguised)
 
 
@@ -133,7 +143,11 @@ func wake(why: String) -> void:
 		_unfold_left = unfold_time
 		_show_disguise(false)
 	for e in get_tree().get_nodes_in_group("enemies"):
-		if e != self and e.global_position.distance_to(global_position) <= alert_range:
+		if e == self:
+			continue
+		if nest != "" and e.nest == nest:
+			e.wake("nest")
+		elif e.global_position.distance_to(global_position) <= alert_range:
 			e.wake("ally")
 
 
@@ -268,7 +282,7 @@ func _physics_process(delta: float) -> void:
 		var why := ""
 		if disguised:
 			why = "unfold" if dist <= unfold_distance else ""
-		elif dist < INF:
+		elif dist < INF and (_stretch == null or _stretch.contains(player.global_position)):
 			why = _senses(to_player, dist)
 		if why == "":
 			if look_sweep > 0.0:
@@ -277,6 +291,11 @@ func _physics_process(delta: float) -> void:
 			_slide(delta, Vector3.ZERO)
 			return
 		wake(why)
+
+	# Past the stretch's edge: give up, walk home, sleep. Never mid-swing.
+	if _stretch and cs.state == CombatState.IDLE and dist < INF and not _stretch.contains(player.global_position):
+		_go_home(delta)
+		return
 
 	# Unfolding from the stump: grow to full size and turn to face, nothing else.
 	if _unfold_left > 0.0:
@@ -355,6 +374,19 @@ func _land_hit() -> void:
 		"parried":
 			Metrics.log_event("parry_success", data)
 			cs.stagger(parry_stagger)
+
+
+func _go_home(delta: float) -> void:
+	var to_home := _home - global_position
+	to_home.y = 0.0
+	if to_home.length() < 0.4:
+		_awake = false
+		rotation.y = _base_yaw
+		_slide(delta, Vector3.ZERO)
+		Metrics.log_event("enemy_gave_up", {"id": name})
+		return
+	rotation.y = rotate_toward(rotation.y, atan2(-to_home.x, -to_home.z), turn_speed * delta)
+	_slide(delta, to_home.normalized() * move_speed)
 
 
 # While disguised only the Stump placeholder shows; the real model hides.

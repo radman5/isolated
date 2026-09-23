@@ -288,6 +288,22 @@ Verified in a scripted run:
 - A sleeping rootkin's idle clip ran at speed 0, and returned to normal speed once it woke.
 - A disguised barkling stayed asleep while the player walked loudly 6m away. At 3.5m it unfolded straight away, and its first wind-up came 0.95s later.
 
+## The nest (`demos/nest.tscn`)
+
+Five rootkin sleep around the nest's heart. Get through it to the green ring.
+
+- **Wake one, wake all.** Enemies with the same `nest` name all wake together, however far apart they are.
+- **The stretch's edge.** `stealth_stretch.gd` is a rectangle drawn faintly on the ground. Any enemy whose `stretch_path` points at it chases you only while you're inside. Past the edge, it walks back to its spot and falls asleep again. A sleeper also ignores anything it sees or hears beyond the edge, so the nest doesn't keep waking and settling while you stand just outside.
+- **The lane.** The four side rootkin face outwards and the last one faces north behind a log. That leaves a sneaking path up the middle to the heart, then round the left end of the log to the exit.
+
+Verified in a scripted run:
+- Sneaking that lane woke nothing and reached the exit.
+- Walking it woke all 5 at once.
+- With the player outside the edge, all 5 walked home, to within 0.13m of their spots, and slept.
+- Running south from the heart after waking the nest, none of them got within 6m of the edge.
+
+**Tuning note:** that escape took no damage. Rootkin (speed 4.0) can't catch a player running at 5.0, and their 0.55s wind-up never lands on a target moving away. "Route 1 monsters" wanted a caught player to lose health, so they may need a short lunge or a faster first step.
+
 ## Stage 5 — sneaking (`demos/stealth.tscn`)
 
 Get from the start to the green ring at the far end. Four skeletons stand guard:

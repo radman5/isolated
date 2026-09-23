@@ -1,0 +1,86 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://demos/arena.tscn" id="1_arena"]
+[ext_resource type="PackedScene" path="res://rootkin.tscn" id="2_rootkin"]
+[ext_resource type="Script" path="res://stealth_stretch.gd" id="3_stretch"]
+
+[sub_resource type="BoxShape3D" id="sh_log"]
+size = Vector3(7, 1.8, 0.6)
+
+[sub_resource type="BoxMesh" id="me_log"]
+size = Vector3(7, 1.8, 0.6)
+
+[sub_resource type="StandardMaterial3D" id="mat_log"]
+albedo_color = Color(0.33, 0.25, 0.17, 1)
+
+[sub_resource type="CylinderMesh" id="me_exit"]
+top_radius = 1.5
+bottom_radius = 1.5
+height = 0.04
+
+[sub_resource type="StandardMaterial3D" id="mat_exit"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0.35, 1, 0.45, 0.5)
+
+[node name="Arena" instance=ExtResource("1_arena")]
+spawn_enemies = false
+stage = "nest"
+
+[node name="Post1" parent="." index="4"]
+visible = false
+
+[node name="Post2" parent="." index="5"]
+visible = false
+
+[node name="Post3" parent="." index="6"]
+visible = false
+
+[node name="Player" parent="." index="7"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 16)
+
+[node name="Stretch" type="Node3D" parent="."]
+script = ExtResource("3_stretch")
+size = Vector3(30, 4, 22)
+
+[node name="Log" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, -8.5)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Log"]
+shape = SubResource("sh_log")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Log"]
+mesh = SubResource("me_log")
+surface_material_override/0 = SubResource("mat_log")
+
+[node name="Exit" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -16)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Exit"]
+mesh = SubResource("me_exit")
+surface_material_override/0 = SubResource("mat_exit")
+
+[node name="Rootkin1" parent="." instance=ExtResource("2_rootkin")]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -3.5, 1.05, 3)
+nest = "nest"
+stretch_path = NodePath("../Stretch")
+
+[node name="Rootkin2" parent="." instance=ExtResource("2_rootkin")]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 3.5, 1.05, 3)
+nest = "nest"
+stretch_path = NodePath("../Stretch")
+
+[node name="Rootkin3" parent="." instance=ExtResource("2_rootkin")]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -3.5, 1.05, -3)
+nest = "nest"
+stretch_path = NodePath("../Stretch")
+
+[node name="Rootkin4" parent="." instance=ExtResource("2_rootkin")]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 3.5, 1.05, -3)
+nest = "nest"
+stretch_path = NodePath("../Stretch")
+
+[node name="Rootkin5" parent="." instance=ExtResource("2_rootkin")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, -6)
+nest = "nest"
+stretch_path = NodePath("../Stretch")
