@@ -268,6 +268,33 @@ better". `fx_toggled` is logged.
 Physics keeps stepping during a freeze, with delta 0, so `_run_chain` skips those steps.
 Otherwise a dash past its time divides by zero and the player's position goes NaN.
 
+## Route 1 graybox (`demos/route1.tscn`)
+
+The whole of Route 1 as grey blocks, from the Glade to Settlement 2, following the "Route 1 shape" and "Route 1 monsters" decisions. **Don't hand-edit the scene.** Change the layout in `tools/gen_route1.py` and run `python3 tools/gen_route1.py`: each stretch of ground is one line in `PIECES`, and walls and trees follow automatically.
+
+| Leg | Beat | What's there |
+|---|---|---|
+| 1 | The Glade | You start here (the arena floor). |
+| 1 | The forest closes in | A 6m path between tree trunks (`forest_edge.gd` draws them along the walls). |
+| 1 | First surprise | A stump barkling on the path. |
+| 1 | Mud clearing | A pair of barklings, and mud that slows you. |
+| — | **Waystone** | Heals you to full and makes leg 2 the restart point (`waystone.gd`). The dead giant tree stands beside it. |
+| 2 | Stealth stretch | The nest: 5 rootkin, the satchel at the heart, and the log. |
+| 2 | Clearing | A group of 3 barklings. |
+| 2 | The ravine | **Placeholder puzzle:** step on the gold ring and the tree bridge drops (`bridge_trigger.gd`). Until then an invisible wall stops you falling in. |
+| — | Settlement 2 | The green ring. It only counts while you're carrying the satchel. |
+
+**Legs** (`route.gd`, which extends `fight.gd`): health carries through a leg and never regenerates. A death reloads the scene and restarts the current leg: from the Glade before the waystone, from the waystone after it. The leg number is a static, so it survives the reload, and leg 1's monsters (the `leg1` group) are removed when leg 2 restarts. Killing every monster doesn't end the route (`clear_wins = false`); only Settlement 2 does. Finishing the route sets you back to leg 1.
+
+Verified in a scripted run:
+- Holding left or right on the first path never took the player past |x| = 2.5.
+- The waystone healed 40 to 100 and set leg 2.
+- Dying in leg 2 restarted at the waystone at full health, with 0 leg 1 and 8 leg 2 monsters.
+- Sneaking the nest lane picked up the satchel with 0/5 rootkin awake.
+- The ravine's lip held, the gold ring dropped the bridge, and reaching Settlement 2 ended the route and reset it to leg 1.
+
+The pacing is much shorter than the design's 12 and 15 minutes per leg. That's for the layout review.
+
 ## Route 1 monsters — stand-ins (`demos/barkling.tscn`, `demos/rootkin.tscn`)
 
 These are the two monsters from the "Route 1 monsters" decision, standing in on KayKit skeletons until the real models exist. Both demos are the arena with a different `enemy_scene`, so `-`/`=` still sets the count.

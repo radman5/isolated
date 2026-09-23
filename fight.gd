@@ -37,8 +37,11 @@ var _reset_in := 0.0
 var _arrow_label := Label.new()
 var _hp_bar := ProgressBar.new()
 var _down := 0
+var _winner := ""
 
 @onready var player: Node = $Player
+## Killing every enemy ends the fight. Off for a route, where the exit ends it.
+@export var clear_wins := true
 ## Reaching the exit only counts while carrying this item (e.g. "satchel").
 @export var exit_needs := ""
 ## Optional. Reaching it ends the fight: "sneaked" if nothing woke, else "escaped".
@@ -75,7 +78,7 @@ func _process(delta: float) -> void:
 		_down = down
 		Metrics.log_event("enemy_down", {"cleared": down, "player_hp": snappedf(player.cs.health, 0.1)})
 	var winner := ""
-	if not enemies.is_empty() and enemies.all(func(e): return e.cs.dead()):
+	if clear_wins and not enemies.is_empty() and enemies.all(func(e): return e.cs.dead()):
 		winner = "player"
 	elif player.cs.dead():
 		winner = "enemy"
@@ -85,6 +88,7 @@ func _process(delta: float) -> void:
 		return
 
 	_over = true
+	_winner = winner
 	_reset_in = reset_delay
 	Metrics.log_event(
 		"fight_end",
