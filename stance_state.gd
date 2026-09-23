@@ -200,5 +200,38 @@ static func fan_dirs(dir: Vector3, count: int, spread_deg: float) -> Array[Vecto
 	return out
 
 
+# Arrow rain size after holding `hold_s`: x = diameter, y = arrow count. Both
+# grow linearly from min to max over grow_time, then stop.
+static func rain_size(
+	hold_s: float, grow_time: float, min_d: float, max_d: float, min_n: int, max_n: int
+) -> Vector2:
+	var t := clampf(hold_s / maxf(grow_time, 0.001), 0.0, 1.0)
+	return Vector2(lerpf(min_d, max_d, t), roundi(lerpf(min_n, max_n, t)))
+
+
+# One step of the rain target trailing the cursor: it moves toward `goal` at a
+# constant `speed`, and neither ever lies past max_range from `origin` (flat).
+static func rain_follow(
+	target: Vector3, goal: Vector3, origin: Vector3, max_range: float, speed: float, delta: float
+) -> Vector3:
+	var off := Vector2(goal.x - origin.x, goal.z - origin.z).limit_length(max_range)
+	var clamped := Vector3(origin.x + off.x, target.y, origin.z + off.y)
+	var step := Vector2(target.x, target.z).move_toward(Vector2(clamped.x, clamped.z), speed * delta)
+	# Walking away drags the target along rather than leaving it out of range.
+	var back := (step - Vector2(origin.x, origin.z)).limit_length(max_range)
+	return Vector3(origin.x + back.x, target.y, origin.z + back.y)
+
+
+# `n` random points spread evenly over a flat disk (sqrt keeps them from
+# bunching at the centre).
+static func rain_points(center: Vector3, diameter: float, n: int, rng: RandomNumberGenerator) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for i in n:
+		var r := diameter * 0.5 * sqrt(rng.randf())
+		var a := rng.randf() * TAU
+		out.append(center + Vector3(cos(a) * r, 0.0, sin(a) * r))
+	return out
+
+
 static func _flat_dist(a: Vector3, b: Vector3) -> float:
 	return Vector2(a.x - b.x, a.z - b.z).length()

@@ -30,7 +30,7 @@ scene dropped there. `Backspace` brings the menu back.
 
 ## Controls
 
-`WASD` move · **hold `Shift`** sneak · `Space` dodge · **hold RMB** block · `1`/`2` sword/bow ·
+`WASD` move · **hold `Shift`** sneak · `Space` dodge · **hold RMB** block · `1` sword · `2` bow shot · `3` volley · `4` arrow rain ·
 `-`/`=` enemy count · `[`/`]` arrow count · `F1` debug · `Esc` free the cursor · `R` restart.
 Facing follows the mouse.
 
@@ -62,9 +62,26 @@ white with an end mark when it hits nothing. Like the chain path, it's always dr
   A light tap stops in the first.
 - **Falloff.** Each earlier pierce costs `pierce_falloff` (15%), compounding: 30 → 25.5 →
   21.7 → 18.4 at full draw.
-- **Volley.** The `arrows` −/+ buttons (or `[`/`]`) set 1–7 arrows, `arrow_spread_deg` (8°)
-  apart around the aim. Each pierces on its own. The bow is free; the draw time is its only limit.
-  It changes live, without restarting the fight.
+- **Volley (`3`).** Fires `arrow_count` arrows (3 by default), `arrow_spread_deg` (8°)
+  apart around the aim. Each pierces on its own. The `arrows` −/+ buttons (or `[`/`]`) tune
+  it from 1 to 7, live, without restarting the fight. It then waits `volley_cooldown` (2s).
+  The single shot (`2`) always fires one arrow and is free.
+
+**Arrow rain (`4`).** Hold to show the target circle on the ground. It starts
+`rain_min_diameter` (1m) wide with `rain_min_arrows` (4), and grows to `rain_max_diameter`
+(5m) with `rain_max_arrows` (20) over `rain_grow_time` (1.5s). The circle trails the mouse
+at `rain_follow_speed` (6 m/s), so it lags behind a fast flick, and never goes past
+`rain_range` (14m, the faint ring around you). Enemies inside it get a green ring. The bow's shot cone isn't drawn in this mode.
+Release: the arrows go up, then each drops onto its own random point in the circle, about
+0.05s apart. Each hits every enemy within `rain_hit_radius` (0.8m) of where it lands, for
+`rain_damage` (15) and half a stagger, with no knockback. Hits are decided where the arrows
+land, not at release, so walking out of the circle works. The cooldown is
+`rain_cooldown_per_arrow` (0.25s) × arrows, so a full rain waits 5s. A draw started while a
+mode is cooling down is refused.
+
+Verified in a scripted run: a full rain on a frozen enemy landed all 10 arrows (150 damage)
+about 1.2s after release. That was with the earlier 10-arrow, 10m circle.
+Rain arrows don't cut trap ropes yet.
 
 Verified in a scripted run with 4 enemies in a line and one to the side: a full draw
 previewed Enemy1–4 and landed exactly 30, 25.5, 21.7, 18.4. With 3 arrows, two lines ran
@@ -85,10 +102,12 @@ The player has no stamina. Cooldowns are the only limit on actions:
 | Click swing | Free. Only its own wind-up and recovery pace it. |
 | Charged chain | `chain_cooldown_per_link` (1s) × the links in the chain, from release. A 3-link chain waits 3s. A charge released with no target costs nothing. |
 | Dodge | `dodge_cooldown` (0.65s) from the start of one roll to the next, so 0.25s after the roll ends. |
-| Bow | Free. The draw time is the limit. |
+| Bow shot (`2`) | Free. The draw time is the limit. |
+| Volley (`3`) | `volley_cooldown` (2s) after firing. |
+| Arrow rain (`4`) | `rain_cooldown_per_arrow` (0.25s) × arrows fired. |
 | Block | Free, but every blocked hit still chips `block_chip` (25%) off health, which never comes back. There is no guard break any more. |
 
-The debug label and HUD show both cooldowns (`cd chain · dodge`). The chain cooldown
+The debug label and HUD show every cooldown (`cd chain · dodge · volley · rain`). The chain cooldown
 does not yet shrink with skill level, because there is no skill system yet.
 
 **Enemies still use stamina**, but only to space out their swings (`attack_cost` against
@@ -421,6 +440,9 @@ Starting numbers. Record where you actually land; that record is the deliverable
 | `hit_stagger` | 0.75 | |
 | `bow_pierce` / `skill_pierce` / `pierce_falloff` | 2 / 1 / 15% | |
 | `arrow_spread_deg` / **enemy** `toughness` | 8° / 1 | |
+| `volley_cooldown` / `rain_cooldown_per_arrow` | 2 s / 0.25 s | |
+| `rain_min_diameter`–`rain_max_diameter` / arrows / `rain_grow_time` | 1–5 m / 4–20 / 1.5 s | |
+| `rain_range` / `rain_follow_speed` / `rain_damage` / `rain_hit_radius` | 14 m / 6 m/s / 15 / 0.8 m | |
 | `attack_knockback` / `link_knockback` / `finisher_knock_mult` | 1.2 m / 2.5 m / 2.5 | |
 | `dodge_time` / `dodge_distance` / `dodge_cooldown` | 0.40 / 3.5 / 0.65 s | |
 | `iframe_start` / `iframe_end` | 0.05 / 0.28 | |

@@ -113,7 +113,8 @@ func _draw_player(delta: float) -> void:
 			if _p.weapon == Stance.SWORD and ss.stance == Stance.NONE and cs.state == CombatState.IDLE:
 				# What a click would hit right now.
 				_swing_fan(pos, _p.rotation.y, _p.attack_arc, _p.attack_reach, GREY, 0.05, target, 0.5)
-			elif ss.stance == Stance.BOW:
+			elif ss.stance == Stance.BOW and _p.bow_mode != _p.BowMode.RAIN:
+				# The rain draws its own circle instead of a shot cone.
 				var dir: Vector3 = _p.bow_aim()
 				var length: float = _p.bow_length(_p.draw_strength)
 				var yaw := atan2(-dir.x, -dir.z)
@@ -125,14 +126,19 @@ func _draw_player(delta: float) -> void:
 	_p_label.position = pos + Vector3(0, 1.35, 0) - _cam_right() * 0.7
 	_p_label.modulate = _state_colour(cs.state)
 	var head: String = (Stance.NAMES[_p.weapon] if ss.stance == Stance.NONE else ss.name_of()).to_upper()
+	if _p.weapon == Stance.BOW:
+		head += " " + _p.BOW_MODE_NAMES[_p.bow_mode]
 	var extra := ""
 	if cs.charging():
 		extra = "  links %d/%d (weapon %d · skill %d)" % [
 			_p.links_now(), _p.link_cap(), _p.sword_max_links, _p.skill_max_links,
 		]
+	elif ss.stance == Stance.BOW and _p.bow_mode == _p.BowMode.RAIN:
+		var size: Vector2 = _p.rain_size()
+		extra = "  rain ⌀%.1fm · %d arrows" % [size.x, int(size.y)]
 	elif ss.stance == Stance.BOW:
 		var s: float = _p.draw_strength
-		extra = "  draw %.0f%% · pierce budget %.1f · arrows %d" % [s * 100.0, _p.pierce_budget(s), _p.arrow_count]
+		extra = "  draw %.0f%% · pierce budget %.1f · arrows %d" % [s * 100.0, _p.pierce_budget(s), _p.arrows_now()]
 	var flags := ""
 	if cs.invulnerable():
 		flags += "  IFRAMES"
@@ -140,9 +146,9 @@ func _draw_player(delta: float) -> void:
 		flags += "  PARRY"
 	if _p.chaining():
 		flags += "  CHAIN %d/%d" % [_p.link_i + 1, _p._chain.size()]
-	_p_label.text = "%s · %s%s\nchain landed %d%s\nhp %.0f  cd chain %.1f dodge %.1f%s" % [
+	_p_label.text = "%s · %s%s\nchain landed %d%s\nhp %.0f  cd chain %.1f dodge %.1f volley %.1f rain %.1f%s" % [
 		head, cs.state_name(), _timer(cs), _p.chain_hits,
-		extra, cs.health, _p.chain_ready_in, cs.dodge_ready_in, flags,
+		extra, cs.health, _p.chain_ready_in, cs.dodge_ready_in, _p.volley_ready_in, _p.rain_ready_in, flags,
 	]
 
 

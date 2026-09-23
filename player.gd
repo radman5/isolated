@@ -149,6 +149,24 @@ signal debug_event(kind: String, data: Dictionary)
 @export var bow_charge_time := 1.0
 ## Draw the moment the arrow is nocked, as a fraction of full.
 @export var bow_min_draw := 0.2
+## Key 3's volley waits this long after firing.
+@export var volley_cooldown := 2.0
+## Key 4: arrow rain. Hold grows the circle and its arrow count from min to max
+## over rain_grow_time; the circle trails the cursor at rain_follow_speed and
+## stays within rain_range of you. Release shoots them up; they land scattered.
+@export var rain_cooldown_per_arrow := 0.25
+@export var rain_range := 14.0
+@export var rain_follow_speed := 6.0
+@export var rain_grow_time := 1.5
+@export var rain_min_diameter := 1.0
+@export var rain_max_diameter := 5.0
+@export var rain_min_arrows := 4
+@export var rain_max_arrows := 20
+@export var rain_damage := 15.0
+## An arrow hits every enemy within this of where it lands.
+@export var rain_hit_radius := 0.8
+## Falling arrows start this high, above the camera, so they drop into view.
+@export var rain_height := 30.0
 
 @export_group("Block")
 @export var block_chip := 0.25
@@ -162,9 +180,12 @@ const CS_TUNABLES := [
 ]
 const SS_TUNABLES := ["block_chip", "parry_window", "parry_enabled"]
 
-# Arrows per shot, set by the HUD buttons. Static so it survives the reload
-# after each fight.
-static var arrow_count := 1
+enum BowMode { SINGLE, VOLLEY, RAIN }
+const BOW_MODE_NAMES := ["shot", "volley", "rain"]
+
+# Arrows in a key-3 volley, tuned by the HUD buttons. Static so it survives the
+# reload after each fight.
+static var arrow_count := 3
 
 var cs := CombatState.new()
 var cam_rel := CameraRelative.new()
@@ -180,6 +201,12 @@ var dodge_dir := Vector3.FORWARD  # read by character_view to pick the dodge ani
 var strike_yaw := 0.0  # direction of the current swing
 var chain_hits := 0  # links landed by the current chain
 var chain_ready_in := 0.0  # seconds until the chain can be charged again
+var bow_mode := BowMode.SINGLE  # 2 shot, 3 volley, 4 rain
+var volley_ready_in := 0.0
+var rain_ready_in := 0.0
+var rain_target := Vector3.ZERO  # centre of the rain circle; trails the cursor
+var _rain_hold := 0.0  # seconds the rain has been held
+var _rng := RandomNumberGenerator.new()
 # Index of the link being dashed to; -1 for a plain swing. Read by character_view
 # to restart the slash on each link.
 var link_i := -1
@@ -267,6 +294,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		weapon = Stance.SWORD
 	elif event.is_action_pressed("weapon_bow") and ss.stance == Stance.NONE:
 		weapon = Stance.BOW
+		bow_mode = BowMode.SINGLE
+	elif event is InputEventKey and event.pressed and not event.echo and ss.stance == Stance.NONE \
+			and event.physical_keycode in [KEY_3, KEY_4]:
+		weapon = Stance.BOW
+		bow_mode = BowMode.VOLLEY if event.physical_keycode == KEY_3 else BowMode.RAIN
 
 
 func _physics_process(delta: float) -> void:
@@ -280,6 +312,8 @@ func _physics_process(delta: float) -> void:
 	g.tick(delta)
 	_reject_cool = maxf(0.0, _reject_cool - delta)
 	chain_ready_in = maxf(0.0, chain_ready_in - delta)
+	volley_ready_in = maxf(0.0, volley_ready_in - delta)
+	rain_ready_in = maxf(0.0, rain_ready_in - delta)
 	_stance_edges()
 	cs.hold = (
 		weapon == Stance.SWORD and ss.stance == Stance.NONE
@@ -287,7 +321,15 @@ func _physics_process(delta: float) -> void:
 		and chain_ready_in == 0.0
 	)
 	ss.tick(delta)
-	if ss.stance == Stance.BOW:
+	if ss.stance == Stance.BOW and bow_mode == BowMode.RAIN:
+		_rain_hold += delta
+		var cursor = _cursor_point(get_viewport().get_camera_3d())
+		if cursor != null:
+			rain_target = Stance.rain_follow(
+				rain_target, cursor, global_position, rain_range, rain_follow_speed, delta
+			)
+		draw_strength = clampf(_rain_hold / maxf(rain_grow_time, 0.001), 0.0, 1.0)
+	elif ss.stance == Stance.BOW:
 		if _nocked_for < 0.0 and g.drag.length() >= bow_draw_threshold:
 			_nocked_for = 0.0
 		elif _nocked_for >= 0.0:
@@ -329,9 +371,12 @@ func _physics_process(delta: float) -> void:
 func _stance_edges() -> void:
 	if weapon == Stance.BOW:
 		if Input.is_action_just_pressed("attack"):
-			_enter_stance(Stance.BOW)
+			_start_draw()
 		elif Input.is_action_just_released("attack") and ss.stance == Stance.BOW:
-			_fire_bow()
+			if bow_mode == BowMode.RAIN:
+				_fire_rain()
+			else:
+				_fire_bow()
 			_exit_stance("release")
 	else:
 		_sword_edges()
@@ -340,6 +385,20 @@ func _stance_edges() -> void:
 		_enter_stance(Stance.BLOCK)
 	elif Input.is_action_just_released("block") and ss.stance == Stance.BLOCK:
 		_exit_stance("release")
+
+
+# A mode still cooling down refuses the draw, so the release fires nothing.
+func _start_draw() -> void:
+	var wait: float = {BowMode.VOLLEY: volley_ready_in, BowMode.RAIN: rain_ready_in}.get(bow_mode, 0.0)
+	if wait > 0.0:
+		Metrics.log_event("attack_refused", {"mode": BOW_MODE_NAMES[bow_mode], "cooldown": snappedf(wait, 0.01)})
+		return
+	_enter_stance(Stance.BOW)
+	if ss.stance == Stance.BOW and bow_mode == BowMode.RAIN:
+		_rain_hold = 0.0
+		var cursor = _cursor_point(get_viewport().get_camera_3d())
+		var goal: Vector3 = cursor if cursor != null else global_position
+		rain_target = Stance.rain_follow(goal, goal, global_position, rain_range, 0.0, 0.0)
 
 
 func _sword_edges() -> void:
@@ -580,6 +639,8 @@ func apply_knock(v: Vector3) -> void:
 
 func _fire_bow() -> void:
 	var strength := draw_strength
+	if bow_mode == BowMode.VOLLEY:
+		volley_ready_in = volley_cooldown
 	var hits := 0
 	var max_pierce := 0
 	# ponytail: who gets hit is decided at release (the preview's answer), and each
@@ -605,15 +666,61 @@ func _fire_bow() -> void:
 			"arc": bow_arc, "hit": not targets.is_empty() or not arrow.shoots.is_empty(), "strength": strength,
 		})
 	Metrics.log_event("arrow_fired", {
-		"strength": snappedf(strength, 0.01), "arrows": arrow_count, "hits": hits, "max_pierce": max_pierce,
+		"strength": snappedf(strength, 0.01), "arrows": arrows_now(), "hits": hits, "max_pierce": max_pierce,
 	})
 
 
-func _launch(dir: Vector3, length: float, planned: Array, strength: float) -> void:
+# Diameter and arrow count the rain would have if released now.
+func rain_size() -> Vector2:
+	return Stance.rain_size(
+		_rain_hold, rain_grow_time, rain_min_diameter, rain_max_diameter, rain_min_arrows, rain_max_arrows
+	)
+
+
+# Arrows go up from the bow, then one falls onto each random point in the
+# circle. Who gets hit is decided where each lands, not at release: it is an
+# area denial shot, so walking out of it should work.
+func _fire_rain() -> void:
+	var size := rain_size()
+	var n := int(size.y)
+	rain_ready_in = rain_cooldown_per_arrow * n
+	var toward := rain_target - global_position
+	toward.y = 0.0
+	toward = toward.normalized() if toward.length() > 0.05 else -global_transform.basis.z
+	var up := (Vector3.UP + toward * 0.25).normalized()
+	var down := (Vector3.DOWN + toward * 0.15).normalized()
+	var points := Stance.rain_points(rain_target, size.x, n, _rng)
+	for i in n:
+		_launch(up, 20.0, [], 1.0)
+		# Each starts a little higher than the last, so they land ~0.05s apart.
+		var fall := (rain_height + i * 2.0) / -down.y
+		_launch(down, fall, [{"at": fall, "rain": points[i]}], 1.0, points[i] - down * fall)
+	Metrics.log_event("rain_fired", {"arrows": n, "diameter": snappedf(size.x, 0.1)})
+
+
+func _rain_land(point: Vector3) -> void:
+	var hits := 0
+	for e in enemies():
+		if Vector2(e.global_position.x - point.x, e.global_position.z - point.z).length() > rain_hit_radius:
+			continue
+		hits += 1
+		e.take_hit(rain_damage, hit_stagger * 0.5)
+		_impact(e, Vector3.DOWN, arrow_shake * 0.5, 8)
+		debug_event.emit("dealt", {
+			"dmg": rain_damage, "stagger": hit_stagger * 0.5, "charge": 0.0, "chain": 0, "cap": 0,
+			"source": "rain", "pierce": 0, "target": e, "knock": 0.0, "finisher": false,
+		})
+	Fx.ring(get_tree(), Vector3(point.x, 0.05, point.z),
+		Color(0.35, 1.0, 0.45, 0.9) if hits > 0 else Color(1, 1, 1, 0.35), 0.8)
+	Metrics.log_event("rain_arrow_landed", {"hits": hits})
+
+
+func _launch(dir: Vector3, length: float, planned: Array, strength: float, from = null) -> void:
 	var node: Node3D = ArrowModel.instantiate()
 	get_parent().add_child(node)
 	# Roughly bow height, a little ahead. The model's tip points +Z.
-	var from := global_position + Vector3(0, 0.35, 0) + dir * 0.5
+	if from == null:
+		from = global_position + Vector3(0, 0.35, 0) + dir * 0.5
 	node.global_transform = Transform3D(Basis.looking_at(-dir).scaled(Vector3.ONE * arrow_scale), from)
 	node.reset_physics_interpolation()
 	_flights.append({
@@ -628,7 +735,9 @@ func _fly_arrows(delta: float) -> void:
 		f.node.global_position = f.from + f.dir * f.travelled
 		while not f.hits.is_empty() and f.hits[0].at <= f.travelled:
 			var h: Dictionary = f.hits.pop_front()
-			if h.has("shoot"):
+			if h.has("rain"):
+				_rain_land(h.rain)
+			elif h.has("shoot"):
 				if is_instance_valid(h.shoot):
 					h.shoot.shot()
 			else:
@@ -652,6 +761,10 @@ func _arrow_hit(e, n: int, dir: Vector3, strength: float) -> void:
 	})
 
 
+func arrows_now() -> int:
+	return arrow_count if bow_mode == BowMode.VOLLEY else 1
+
+
 func pierce_budget(strength: float) -> float:
 	return strength * (bow_pierce + skill_pierce)
 
@@ -669,7 +782,7 @@ func arrow_hits(strength: float) -> Array:
 	var tough := foes.map(func(e): return e.toughness)
 	var length := bow_length(strength)
 	var out := []
-	for dir in Stance.fan_dirs(bow_aim().normalized(), arrow_count, arrow_spread_deg):
+	for dir in Stance.fan_dirs(bow_aim().normalized(), arrows_now(), arrow_spread_deg):
 		var idx := Stance.arrow_path(global_position, dir, at, tough, length, bow_arc, pierce_budget(strength))
 		var targets := idx.map(func(i): return foes[i])
 		var reach := length
@@ -739,7 +852,13 @@ func receive_hit(amount: float) -> String:
 func _aim(delta: float, cam: Camera3D) -> void:
 	var rate := Stance.rot_rate(ss.stance, cs.state)
 	var yaw = null
-	if ss.stance == Stance.BOW:
+	if ss.stance == Stance.BOW and bow_mode == BowMode.RAIN:
+		var to := rain_target - global_position
+		if to.length() < 0.05:
+			return
+		yaw = atan2(-to.x, -to.z)
+		rate = charge_turn_rate
+	elif ss.stance == Stance.BOW:
 		# Face where the arrow will go: opposite the pull. Only once the pull is
 		# past the nock threshold, so a small wobble on press does not spin you.
 		if g.drag.length() < bow_draw_threshold:
@@ -838,6 +957,17 @@ func _aim_preview() -> void:
 			_ribbon(from, at, 0.06 if locked else 0.03, col)
 			_ring(at, 0.55, 0.07, col)
 			from = at
+		_preview.surface_end()
+	elif ss.stance == Stance.BOW and bow_mode == BowMode.RAIN:
+		var r := rain_size().x * 0.5
+		var c := Vector3(rain_target.x, 0.05, rain_target.z)
+		_preview.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+		_ring(_ground(self), rain_range, 0.04, Color(1, 1, 1, 0.15))
+		_ring(c, r, 0.08, Color(0.35, 1.0, 0.45, 0.8))
+		for e in enemies():
+			var at := _ground(e)
+			if Vector2(at.x - c.x, at.z - c.z).length() <= r:
+				_ring(at, 0.55, 0.07, Color(0.35, 1.0, 0.45, 0.95))
 		_preview.surface_end()
 	elif ss.stance == Stance.BOW:
 		var strength := draw_strength

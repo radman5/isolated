@@ -38,6 +38,7 @@ func _initialize() -> void:
 	_hold_active()
 	_arrow_path()
 	_fan_dirs()
+	_rain()
 	_bow_draw()
 	_shot_passes()
 	_hazard_shapes()
@@ -557,6 +558,36 @@ func _arrow_path() -> void:
 
 
 # 25. A volley fans out evenly around the aim.
+# Arrow rain: size grows then caps, the target trails the cursor inside range,
+# and every arrow lands inside the circle.
+func _rain() -> void:
+	var sz := Stance.rain_size(0.0, 1.5, 2.0, 10.0, 2, 10)
+	assert(sz == Vector2(2, 2), "a zero hold was not the minimum: %s" % sz)
+	assert(Stance.rain_size(0.75, 1.5, 2.0, 10.0, 2, 10) == Vector2(6, 6), "not linear at half")
+	assert(Stance.rain_size(9.0, 1.5, 2.0, 10.0, 2, 10) == Vector2(10, 10), "rain grew past its cap")
+
+	var o := Vector3.ZERO
+	var t := Vector3(0, 0, -2)
+	var far := Vector3(0, 0, -40)
+	for i in 600:
+		var next := Stance.rain_follow(t, far, o, 14.0, 6.0, DT)
+		assert(next.distance_to(t) <= 6.0 * DT + 0.0001, "the target jumped")
+		t = next
+		assert(Vector2(t.x, t.z).length() <= 14.0001, "the target left the range")
+	assert(t.distance_to(Vector3(0, 0, -14)) < 0.001, "the target never reached the clamped goal")
+	# The player walking away drags an out-of-range target back inside.
+	t = Stance.rain_follow(Vector3(0, 0, -14), Vector3(0, 0, -14), Vector3(0, 0, 10), 14.0, 6.0, DT)
+	assert(Vector2(t.x, t.z - 10.0).length() <= 14.0001, "a left-behind target stayed out of range")
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var c := Vector3(3, 0, -5)
+	var pts := Stance.rain_points(c, 10.0, 10, rng)
+	assert(pts.size() == 10, "wrong arrow count: %d" % pts.size())
+	for p in pts:
+		assert(p.distance_to(c) <= 5.0001, "an arrow landed outside the circle")
+
+
 func _fan_dirs() -> void:
 	var fwd := Vector3(0, 0, -1)
 	var one: Array = Stance.fan_dirs(fwd, 1, 8.0)

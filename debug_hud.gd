@@ -20,7 +20,7 @@ func _process(_delta: float) -> void:
 	var cs = _p.cs
 	var v: Vector3 = _p.velocity
 	text = (
-		"state    %s  t=%.2f\nhealth   %5.1f / %.0f\ncooldown chain %.1f  dodge %.1f\ni-frames %s\nspeed    %.2f"
+		"state    %s  t=%.2f\nhealth   %5.1f / %.0f\ncooldown chain %.1f  dodge %.1f  volley %.1f  rain %.1f\ni-frames %s\nspeed    %.2f"
 		% [
 			cs.state_name(),
 			cs.t,
@@ -28,6 +28,8 @@ func _process(_delta: float) -> void:
 			cs.health_max,
 			_p.chain_ready_in,
 			cs.dodge_ready_in,
+			_p.volley_ready_in,
+			_p.rain_ready_in,
 			"YES" if cs.invulnerable() else "-",
 			Vector2(v.x, v.z).length(),
 		]
@@ -53,4 +55,4 @@ func _process(_delta: float) -> void:
 				e.name, "dead" if ec.dead() else ec.state_name(), ec.t, ec.health,
 				"  PUNISH" if open and not ec.dead() else "",
 			]
-	text += "\n\nLMB click swing / hold to charge a chain, release to strike  RMB block  Space dodge  Shift sneak  1/2 weapon\nC = camera-blame   R = restart   Esc = free cursor   -/+ enemies   [/] arrows   F1 debug   F2 fx"
+	text += "\n\nLMB click swing / hold to charge a chain, release to strike  RMB block  Space dodge  Shift sneak  1 sword  2 shot  3 volley  4 rain\nC = camera-blame   R = restart   Esc = free cursor   -/+ enemies   [/] volley arrows   F1 debug   F2 fx"
