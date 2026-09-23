@@ -201,6 +201,7 @@ var dodge_dir := Vector3.FORWARD  # read by character_view to pick the dodge ani
 var strike_yaw := 0.0  # direction of the current swing
 var chain_hits := 0  # links landed by the current chain
 var chain_ready_in := 0.0  # seconds until the chain can be charged again
+var carrying := {}  # item name -> true, filled by pickup.gd
 var bow_mode := BowMode.SINGLE  # 2 shot, 3 volley, 4 rain
 var volley_ready_in := 0.0
 var rain_ready_in := 0.0

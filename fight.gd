@@ -39,6 +39,8 @@ var _hp_bar := ProgressBar.new()
 var _down := 0
 
 @onready var player: Node = $Player
+## Reaching the exit only counts while carrying this item (e.g. "satchel").
+@export var exit_needs := ""
 ## Optional. Reaching it ends the fight: "sneaked" if nothing woke, else "escaped".
 @onready var _exit: Node3D = get_node_or_null("Exit")
 
@@ -77,7 +79,7 @@ func _process(delta: float) -> void:
 		winner = "player"
 	elif player.cs.dead():
 		winner = "enemy"
-	elif _exit and Vector2(player.global_position.x - _exit.global_position.x, player.global_position.z - _exit.global_position.z).length() < 1.5:
+	elif _exit and (exit_needs == "" or player.carrying.has(exit_needs)) and Vector2(player.global_position.x - _exit.global_position.x, player.global_position.z - _exit.global_position.z).length() < 1.5:
 		winner = "escaped" if enemies.any(func(e): return e.awake()) else "sneaked"
 	if winner == "":
 		return

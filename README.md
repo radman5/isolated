@@ -290,15 +290,17 @@ Verified in a scripted run:
 
 ## The nest (`demos/nest.tscn`)
 
-Five rootkin sleep around the nest's heart. Get through it to the green ring.
+Five rootkin sleep around the nest's heart, where the healer's satchel lies. Pick it up and get it to the green ring. The exit only counts while you're carrying it (`fight.gd`'s `exit_needs`).
 
 - **Wake one, wake all.** Enemies with the same `nest` name all wake together, however far apart they are.
 - **The stretch's edge.** `stealth_stretch.gd` is a rectangle drawn faintly on the ground. Any enemy whose `stretch_path` points at it chases you only while you're inside. Past the edge, it walks back to its spot and falls asleep again. A sleeper also ignores anything it sees or hears beyond the edge, so the nest doesn't keep waking and settling while you stand just outside.
+- **The satchel** (`pickup.gd`): walking within 0.9m of it picks it up silently into `player.carrying`, and the HUD shows `CARRYING satchel`. Restarting reloads the scene and puts it back.
 - **The lane.** The four side rootkin face outwards and the last one faces north behind a log. That leaves a sneaking path up the middle to the heart, then round the left end of the log to the exit.
 
 Verified in a scripted run:
 - Sneaking that lane woke nothing and reached the exit.
 - Walking it woke all 5 at once.
+- Reaching the exit round the side without the satchel didn't count. Sneaking the lane through the heart picked it up without waking anything, and the run ended at the exit.
 - With the player outside the edge, all 5 walked home, to within 0.13m of their spots, and slept.
 - Running south from the heart after waking the nest, none of them got within 6m of the edge.
 

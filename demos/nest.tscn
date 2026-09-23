@@ -3,6 +3,7 @@
 [ext_resource type="PackedScene" path="res://demos/arena.tscn" id="1_arena"]
 [ext_resource type="PackedScene" path="res://rootkin.tscn" id="2_rootkin"]
 [ext_resource type="Script" path="res://stealth_stretch.gd" id="3_stretch"]
+[ext_resource type="Script" path="res://pickup.gd" id="4_pickup"]
 
 [sub_resource type="BoxShape3D" id="sh_log"]
 size = Vector3(7, 1.8, 0.6)
@@ -12,6 +13,12 @@ size = Vector3(7, 1.8, 0.6)
 
 [sub_resource type="StandardMaterial3D" id="mat_log"]
 albedo_color = Color(0.33, 0.25, 0.17, 1)
+
+[sub_resource type="BoxMesh" id="me_satchel"]
+size = Vector3(0.5, 0.35, 0.3)
+
+[sub_resource type="StandardMaterial3D" id="mat_satchel"]
+albedo_color = Color(0.62, 0.42, 0.2, 1)
 
 [sub_resource type="CylinderMesh" id="me_exit"]
 top_radius = 1.5
@@ -26,6 +33,7 @@ albedo_color = Color(0.35, 1, 0.45, 0.5)
 [node name="Arena" instance=ExtResource("1_arena")]
 spawn_enemies = false
 stage = "nest"
+exit_needs = "satchel"
 
 [node name="Post1" parent="." index="4"]
 visible = false
@@ -84,3 +92,11 @@ stretch_path = NodePath("../Stretch")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, -6)
 nest = "nest"
 stretch_path = NodePath("../Stretch")
+
+[node name="Satchel" type="Node3D" parent="."]
+script = ExtResource("4_pickup")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Satchel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.18, 0)
+mesh = SubResource("me_satchel")
+surface_material_override/0 = SubResource("mat_satchel")
