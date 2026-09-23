@@ -21,6 +21,8 @@ const SLOTS := [
 ]
 
 @export var reset_delay := 1.2
+## What the enemy-count buttons spawn.
+@export var enemy_scene: PackedScene = EnemyScene
 ## Off for a hand-built encounter: fight.gd uses the enemies already placed in the
 ## scene, and the enemy-count buttons are hidden.
 @export var spawn_enemies := true
@@ -43,7 +45,7 @@ var _down := 0
 
 func _ready() -> void:
 	for i in (enemy_count if spawn_enemies else 0):
-		var e := EnemyScene.instantiate()
+		var e := enemy_scene.instantiate()
 		e.name = "Enemy%d" % (i + 1)
 		e.position = SLOTS[i] + Vector3(0, 1.05, 0)
 		add_child(e)

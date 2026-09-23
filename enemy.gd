@@ -52,6 +52,10 @@ const Hazard := preload("res://traps/hazard.gd")
 @export var damage := 25.0
 @export var attack_cost := 30.0
 @export var parry_stagger := 1.2  # §6: a successful parry staggers the enemy
+## Metres it dashes forward during its active frames (the barkling's lunge).
+## 0 = a swing on the spot. A lunge starts from this much further out, so
+## attack_range is then the bite's reach from wherever the lunge has got to.
+@export var lunge_distance := 0.0
 
 @export_group("Knockback")
 @export var knockback := 1.0  # metres a clean hit shoves the player
@@ -262,9 +266,9 @@ func _physics_process(delta: float) -> void:
 	# Attack only from IDLE, only in range, only roughly facing. Everything else
 	# about the swing is CombatState's problem.
 	var want_attack := false
-	if dist <= attack_range * 0.95 and cs.state == CombatState.IDLE:
+	if dist <= (attack_range + lunge_distance) * 0.95 and cs.state == CombatState.IDLE:
 		want_attack = CombatState.in_arc(
-			global_position, -global_transform.basis.z, player.global_position, attack_range, 40.0
+			global_position, -global_transform.basis.z, player.global_position, attack_range + lunge_distance, 40.0
 		)
 
 	var ev := cs.advance(delta, want_attack, false)
@@ -295,6 +299,12 @@ func _physics_process(delta: float) -> void:
 	if cs.state == CombatState.IDLE and dist < INF and dist > 0.01:
 		var want := atan2(-to_player.x, -to_player.z)
 		rotation.y = rotate_toward(rotation.y, want, turn_speed * delta)
+	# The lunge snaps straight to full speed: easing into it would eat most of a
+	# 0.12s active window. Facing is already locked, so it goes where it aimed.
+	if lunge_distance > 0.0 and cs.state == CombatState.ACTIVE and _knock == Vector3.ZERO:
+		target = -global_transform.basis.z * lunge_distance / maxf(active_time, 0.01)
+		velocity.x = target.x
+		velocity.z = target.z
 	_slide(delta, target)
 
 

@@ -1,0 +1,29 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://enemy.gd" id="1_enemy"]
+[ext_resource type="Script" path="res://character_view.gd" id="2_view"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/characters/Skeleton_Rogue.glb" id="3_model"]
+[ext_resource type="PackedScene" path="res://assets/kaykit/weapons/Skeleton_Blade.gltf" id="4_blade"]
+
+[sub_resource type="CapsuleShape3D" id="sh_body"]
+radius = 0.5
+height = 2.0
+
+[node name="Rootkin" type="CharacterBody3D"]
+script = ExtResource("1_enemy")
+move_speed = 4.0
+windup_time = 0.55
+damage = 35.0
+health_max = 150.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("sh_body")
+
+[node name="Model" type="Node3D" parent="."]
+script = ExtResource("2_view")
+model = ExtResource("3_model")
+right_hand = ExtResource("4_blade")
+model_scale = 1.0
+is_enemy = true
+still_while_asleep = true
+walk_speed = 3.0

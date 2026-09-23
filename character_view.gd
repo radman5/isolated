@@ -40,6 +40,9 @@ const MAX_WINDUP_SPEED := 1.5
 @export var left_hand_rotation := Vector3.ZERO
 @export var model_scale := 0.9
 @export var is_enemy := false
+## A sleeping enemy freezes on its idle pose instead of breathing: the rootkin
+## standing like a sapling.
+@export var still_while_asleep := false
 ## Speed at which the run cycle plays at 1x, in m/s.
 @export var run_speed := 5.0
 @export var walk_speed := 2.0
@@ -271,7 +274,7 @@ func _drive_idle(ss, entered: bool) -> void:
 	var speed := Vector2(v.x, v.z).length()
 	if speed < 0.3:
 		_play_loop("Skeletons_Idle" if is_enemy else "Idle_A", 0.15)
-		_ap.speed_scale = 1.0
+		_ap.speed_scale = 0.0 if still_while_asleep and not _actor.awake() else 1.0
 	elif is_enemy:
 		_play_loop("Skeletons_Walking", 0.15)
 		_ap.speed_scale = speed / walk_speed

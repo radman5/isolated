@@ -1,0 +1,8 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://demos/arena.tscn" id="1_arena"]
+[ext_resource type="PackedScene" path="res://rootkin.tscn" id="2_enemy"]
+
+[node name="Arena" instance=ExtResource("1_arena")]
+enemy_scene = ExtResource("2_enemy")
+stage = "rootkin"

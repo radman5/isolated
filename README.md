@@ -268,6 +268,23 @@ better". `fx_toggled` is logged.
 Physics keeps stepping during a freeze, with delta 0, so `_run_chain` skips those steps.
 Otherwise a dash past its time divides by zero and the player's position goes NaN.
 
+## Route 1 monsters — stand-ins (`demos/barkling.tscn`, `demos/rootkin.tscn`)
+
+These are the two monsters from the "Route 1 monsters" decision, standing in on KayKit skeletons until the real models exist. Both demos are the arena with a different `enemy_scene`, so `-`/`=` still sets the count.
+
+| | Barkling (`barkling.tscn`) | Rootkin (`rootkin.tscn`) |
+|---|---|---|
+| Stand-in | `Skeleton_Minion` at 0.6 scale, chest height | `Skeleton_Rogue` |
+| Damage / wind-up / recovery | 20 / 0.75s / 0.70s | 35 / 0.55s / 0.60s |
+| Health / move speed | 60, so three click swings / 3.0 | 150 / 4.0, below your 5.0 |
+| Attack | **Lunge**: dashes `lunge_distance` (1.4m) forward during its active frames and bites within `attack_range` (1.4m) of wherever it has got to. It starts from 2.6m out. | The skeleton swing |
+| Asleep | — | `still_while_asleep`: frozen on its idle pose like a sapling |
+
+Verified in a scripted run:
+- A barkling lunging at a player who stood still travelled 1.7m (1.4m plus a short slide as it stopped) and took them from 100 to 80.
+- Three 25-damage swings killed it.
+- A sleeping rootkin's idle clip ran at speed 0, and returned to normal speed once it woke.
+
 ## Stage 5 — sneaking (`demos/stealth.tscn`)
 
 Get from the start to the green ring at the far end. Four skeletons stand guard:
