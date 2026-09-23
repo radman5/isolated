@@ -4,6 +4,14 @@
 [ext_resource type="Script" path="res://character_view.gd" id="2_view"]
 [ext_resource type="PackedScene" path="res://assets/kaykit/characters/Skeleton_Minion.glb" id="3_model"]
 
+[sub_resource type="CylinderMesh" id="me_stump"]
+top_radius = 0.35
+bottom_radius = 0.5
+height = 0.8
+
+[sub_resource type="StandardMaterial3D" id="mat_stump"]
+albedo_color = Color(0.3, 0.36, 0.2, 1)
+
 [sub_resource type="CapsuleShape3D" id="sh_body"]
 radius = 0.4
 height = 1.3
@@ -29,3 +37,9 @@ model = ExtResource("3_model")
 model_scale = 0.6
 is_enemy = true
 walk_speed = 2.5
+
+[node name="Stump" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.6, 0)
+visible = false
+mesh = SubResource("me_stump")
+surface_material_override/0 = SubResource("mat_stump")

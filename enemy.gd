@@ -37,6 +37,12 @@ const Hazard := preload("res://traps/hazard.gd")
 ## A sleeping guard looks side to side by this many degrees. 0 = stares ahead.
 @export var look_sweep := 0.0
 @export var look_period := 5.0
+## Disguised as a stump (the first barkling on Route 1): blind and deaf while
+## asleep, it wakes only when the player comes within unfold_distance, or when
+## hit or woken by an ally. The unfold is a beat where it turns but can't act.
+@export var disguised := false
+@export var unfold_distance := 4.0
+@export var unfold_time := 0.6
 
 @export_group("Attack")
 @export var windup_time := 0.60  # the telegraph. If you cannot react, raise it.
@@ -99,6 +105,7 @@ var _knock := Vector3.ZERO
 var _slow_from := 0  # msec, wall clock
 var _slow_until := 0
 var _slow_scale := 1.0
+var _unfold_left := 0.0
 
 @onready var player: Node = get_node_or_null("../Player")
 
@@ -109,6 +116,7 @@ func _ready() -> void:
 	cs.health = health_max
 	cs.stamina = 100.0
 	_base_yaw = rotation.y
+	_show_disguise(disguised)
 
 
 func awake() -> bool:
@@ -121,6 +129,9 @@ func wake(why: String) -> void:
 		return
 	_awake = true
 	Metrics.log_event("enemy_alerted", {"id": name, "why": why})
+	if disguised:
+		_unfold_left = unfold_time
+		_show_disguise(false)
 	for e in get_tree().get_nodes_in_group("enemies"):
 		if e != self and e.global_position.distance_to(global_position) <= alert_range:
 			e.wake("ally")
@@ -254,7 +265,11 @@ func _physics_process(delta: float) -> void:
 		to_player.y = 0.0
 		dist = to_player.length()
 	if not _awake:
-		var why := _senses(to_player, dist) if dist < INF else ""
+		var why := ""
+		if disguised:
+			why = "unfold" if dist <= unfold_distance else ""
+		elif dist < INF:
+			why = _senses(to_player, dist)
 		if why == "":
 			if look_sweep > 0.0:
 				_look_t += delta
@@ -262,6 +277,17 @@ func _physics_process(delta: float) -> void:
 			_slide(delta, Vector3.ZERO)
 			return
 		wake(why)
+
+	# Unfolding from the stump: grow to full size and turn to face, nothing else.
+	if _unfold_left > 0.0:
+		_unfold_left = maxf(0.0, _unfold_left - delta)
+		var model := get_node_or_null("Model") as Node3D
+		if model:
+			model.scale = Vector3.ONE * lerpf(1.0, 0.3, _unfold_left / maxf(unfold_time, 0.01))
+		if dist < INF and dist > 0.01:
+			rotation.y = rotate_toward(rotation.y, atan2(-to_player.x, -to_player.z), turn_speed * delta)
+		_slide(delta, Vector3.ZERO)
+		return
 
 	# Attack only from IDLE, only in range, only roughly facing. Everything else
 	# about the swing is CombatState's problem.
@@ -329,6 +355,16 @@ func _land_hit() -> void:
 		"parried":
 			Metrics.log_event("parry_success", data)
 			cs.stagger(parry_stagger)
+
+
+# While disguised only the Stump placeholder shows; the real model hides.
+func _show_disguise(on: bool) -> void:
+	var stump := get_node_or_null("Stump") as Node3D
+	var model := get_node_or_null("Model") as Node3D
+	if stump:
+		stump.visible = on
+	if model:
+		model.visible = not on
 
 
 # A step is a bad idea if it lands in something live and harmful, or off a ledge.

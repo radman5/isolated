@@ -280,10 +280,13 @@ These are the two monsters from the "Route 1 monsters" decision, standing in on 
 | Attack | **Lunge**: dashes `lunge_distance` (1.4m) forward during its active frames and bites within `attack_range` (1.4m) of wherever it has got to. It starts from 2.6m out. | The skeleton swing |
 | Asleep | — | `still_while_asleep`: frozen on its idle pose like a sapling |
 
+**Stump disguise** (`demos/stump.tscn`): a barkling with `disguised` on stands as a mossy stump. It's blind and deaf, and it wakes only within `unfold_distance` (4m), or when hit or woken by an ally. It then spends `unfold_time` (0.6s) growing to full size and turning to face you before it can act.
+
 Verified in a scripted run:
 - A barkling lunging at a player who stood still travelled 1.7m (1.4m plus a short slide as it stopped) and took them from 100 to 80.
 - Three 25-damage swings killed it.
 - A sleeping rootkin's idle clip ran at speed 0, and returned to normal speed once it woke.
+- A disguised barkling stayed asleep while the player walked loudly 6m away. At 3.5m it unfolded straight away, and its first wind-up came 0.95s later.
 
 ## Stage 5 — sneaking (`demos/stealth.tscn`)
 

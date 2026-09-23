@@ -1,0 +1,15 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://demos/arena.tscn" id="1_arena"]
+[ext_resource type="PackedScene" path="res://barkling.tscn" id="2_barkling"]
+
+[node name="Arena" instance=ExtResource("1_arena")]
+spawn_enemies = false
+stage = "stump"
+
+[node name="Player" parent="." index="7"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 12)
+
+[node name="Barkling" parent="." instance=ExtResource("2_barkling")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, -4)
+disguised = true
