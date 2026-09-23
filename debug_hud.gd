@@ -20,14 +20,14 @@ func _process(_delta: float) -> void:
 	var cs = _p.cs
 	var v: Vector3 = _p.velocity
 	text = (
-		"state    %s  t=%.2f\nhealth   %5.1f / %.0f\nstamina  %5.1f / %.0f\ni-frames %s\nspeed    %.2f"
+		"state    %s  t=%.2f\nhealth   %5.1f / %.0f\ncooldown chain %.1f  dodge %.1f\ni-frames %s\nspeed    %.2f"
 		% [
 			cs.state_name(),
 			cs.t,
 			cs.health,
 			cs.health_max,
-			cs.stamina,
-			cs.stamina_max,
+			_p.chain_ready_in,
+			cs.dodge_ready_in,
 			"YES" if cs.invulnerable() else "-",
 			Vector2(v.x, v.z).length(),
 		]

@@ -1,5 +1,6 @@
 extends RefCounted
-# Stamina + attack/dodge state machine. Pure logic: no nodes, no physics, no
+# Attack/dodge state machine. Stamina here only paces the enemy's swings: the
+# player has none (docs/adr/0001) and pays with cooldowns instead. Pure logic: no nodes, no physics, no
 # Input, no camera. Everything stage 1 is actually testing lives in this file,
 # which is also what makes check.gd able to run it headlessly.
 #
@@ -20,7 +21,8 @@ var attack_cost := 25.0
 var dodge_time := 0.40
 var iframe_start := 0.05
 var iframe_end := 0.28
-var dodge_cost := 30.0
+## Seconds from the start of one dodge to the next.
+var dodge_cooldown := 0.65
 var stamina_max := 100.0
 var regen_rate := 45.0
 var regen_delay := 0.55
@@ -31,6 +33,7 @@ var state := IDLE
 var t := 0.0  # seconds inside the current state
 var stamina := 100.0
 var regen_timer := 0.0
+var dodge_ready_in := 0.0
 var health := 100.0
 var stagger_time := 0.0
 # Player only. While true, a finished wind-up does not release: the swing is held
@@ -88,8 +91,7 @@ func dead() -> bool:
 # Returns true if the hit landed. False means i-frames ate it, which is the only
 # payoff i-frames have and is what "dodge success" means in the §5 metrics.
 #
-# Health deliberately has no regen counterpart to the stamina one below: it does
-# not come back, ever. That is the attrition hypothesis (§2) and the whole reason
+# Health deliberately does not regenerate: it does not come back, ever. That is the attrition hypothesis (§2) and the whole reason
 # stage 3 exists, so the absence is load-bearing rather than an oversight.
 func take_damage(amount: float) -> bool:
 	if dead() or invulnerable():
@@ -131,13 +133,9 @@ func try_attack(cost: float) -> bool:
 
 # Returns one event string, "" for nothing:
 # "attack" "dodge" "attack_refused" "dodge_refused" "ignored"
-#
-# `drain` is continuous stamina cost from holding a stance (§8). It defaults to
-# zero so enemy.gd's existing call is unchanged in behaviour.
-func advance(
-	delta: float, attack_pressed: bool, dodge_pressed: bool, drain := 0.0
-) -> String:
+func advance(delta: float, attack_pressed: bool, dodge_pressed: bool) -> String:
 	t += delta
+	dodge_ready_in = maxf(0.0, dodge_ready_in - delta)
 
 	# Timed transitions run before input, so the frame recovery ends the state
 	# is already IDLE and a press that same frame starts the next swing. Without
@@ -159,30 +157,32 @@ func advance(
 			if t >= stagger_time:
 				_enter(IDLE)
 
-	# A non-zero drain IS "a stance is held", so §8's "no regeneration while any
-	# stance is held" needs no second flag that could drift out of sync.
-	if drain > 0.0:
-		stamina = maxf(0.0, stamina - drain * delta)
 	regen_timer = maxf(0.0, regen_timer - delta)
-	# Holding a charge pauses regen too: stamina caps the chain's link count, so
-	# waiting at the top of the wind-up must not refill it.
-	if regen_timer == 0.0 and drain == 0.0 and not charging():
+	if regen_timer == 0.0:
 		stamina = minf(stamina_max, stamina + regen_rate * delta)
 
 	# Charging is a voluntary hold, so you can roll out of it the way you can
 	# let go of a drawn bow. The wind-up before the hold point stays committed.
 	if dodge_pressed and charging():
-		return _try(DODGE, dodge_cost, "dodge")
+		return _dodge()
 
 	# Input is read only when IDLE. Non-cancellability is structural, not a
 	# flag: there is no code path that can interrupt a swing or a roll.
 	if state != IDLE:
 		return "ignored" if (attack_pressed or dodge_pressed) else ""
 	if dodge_pressed:
-		return _try(DODGE, dodge_cost, "dodge")
+		return _dodge()
 	if attack_pressed:
 		return _try(WINDUP, attack_cost, "attack")
 	return ""
+
+
+func _dodge() -> String:
+	if dodge_ready_in > 0.0:
+		return "dodge_refused"
+	dodge_ready_in = dodge_cooldown
+	_enter(DODGE)
+	return "dodge"
 
 
 func _try(next: int, cost: float, ev: String) -> String:

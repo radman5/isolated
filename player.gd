@@ -65,12 +65,9 @@ signal debug_event(kind: String, data: Dictionary)
 @export var dodge_distance := 3.5
 @export var iframe_start := 0.05
 @export var iframe_end := 0.28
-@export var dodge_cost := 30.0
-
-@export_group("Stamina")
-@export var stamina_max := 100.0
-@export var regen_rate := 45.0
-@export var regen_delay := 0.55
+## Seconds from the start of one dodge to the next. There is no stamina
+## (docs/adr/0001): cooldowns are the only limit on actions.
+@export var dodge_cooldown := 0.65
 
 @export_group("Health")
 @export var health_max := 100.0
@@ -88,8 +85,10 @@ signal debug_event(kind: String, data: Dictionary)
 @export var sword_max_links := 5
 ## Most links the skill allows. ponytail: a plain export until a skill system exists.
 @export var skill_max_links := 3
-## Stamina per link. A click is one link; a chain pays for the rest on release.
-@export var link_cost := 12.0
+## Chain cooldown per link in the chain, so a longer chain waits longer. While it
+## runs, holding the button is just a click swing. Plain swings are free.
+## ponytail: a plain export until skills level up; the level should shrink this.
+@export var chain_cooldown_per_link := 1.0
 ## Seconds of holding per extra link.
 @export var link_charge_time := 0.35
 ## The first target must be this close to the player.
@@ -127,8 +126,6 @@ signal debug_event(kind: String, data: Dictionary)
 @export var charge_move_mult := 0.35
 
 @export_group("Bow")
-@export var bow_drain := 8.0
-@export var bow_cost := 10.0
 @export var bow_damage := 30.0
 @export var bow_range := 14.0
 @export var bow_arc := 8.0
@@ -154,23 +151,16 @@ signal debug_event(kind: String, data: Dictionary)
 @export var bow_min_draw := 0.2
 
 @export_group("Block")
-@export var block_drain := 5.0
-@export var block_hit_cost := 20.0
 @export var block_chip := 0.25
-@export var stance_break_time := 1.0
 ## §6: block must pass its own gate before this is worth turning on.
 @export var parry_enabled := false
-@export var parry_cost := 15.0
 @export var parry_window := 0.20
 
 const CS_TUNABLES := [
 	"windup_time", "active_time", "recovery_time", "dodge_time", "iframe_start",
-	"iframe_end", "dodge_cost", "stamina_max", "regen_rate", "regen_delay", "health_max",
+	"iframe_end", "dodge_cooldown", "health_max",
 ]
-const SS_TUNABLES := [
-	"bow_drain", "block_drain", "bow_cost", "block_hit_cost", "block_chip",
-	"parry_cost", "parry_window", "parry_enabled", "stance_break_time",
-]
+const SS_TUNABLES := ["block_chip", "parry_window", "parry_enabled"]
 
 # Arrows per shot, set by the HUD buttons. Static so it survives the reload
 # after each fight.
@@ -189,6 +179,7 @@ var _nocked_for := -1.0  # seconds since the pull passed bow_draw_threshold; -1 
 var dodge_dir := Vector3.FORWARD  # read by character_view to pick the dodge animation
 var strike_yaw := 0.0  # direction of the current swing
 var chain_hits := 0  # links landed by the current chain
+var chain_ready_in := 0.0  # seconds until the chain can be charged again
 # Index of the link being dashed to; -1 for a plain swing. Read by character_view
 # to restart the slash on each link.
 var link_i := -1
@@ -215,7 +206,6 @@ var _reject_cool := 0.0
 func _ready() -> void:
 	add_to_group("player")
 	Fx.prewarm.call_deferred(get_tree(), global_position)
-	cs.stamina = stamina_max
 	cs.health_max = health_max
 	cs.health = health_max
 	Input.mouse_mode = Input.MOUSE_MODE_CONFINED
@@ -261,8 +251,8 @@ func _input(event: InputEvent) -> void:
 	if flick == Vector2.ZERO or ss.stance != Stance.BLOCK:
 		return
 	last_flick_deg = rad_to_deg(atan2(flick.x, -flick.y))
-	if ss.try_parry(cs):
-		Metrics.log_event("parry_attempted", {"stamina": snappedf(cs.stamina, 0.1)})
+	if ss.try_parry():
+		Metrics.log_event("parry_attempted", {})
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -289,10 +279,12 @@ func _physics_process(delta: float) -> void:
 
 	g.tick(delta)
 	_reject_cool = maxf(0.0, _reject_cool - delta)
+	chain_ready_in = maxf(0.0, chain_ready_in - delta)
 	_stance_edges()
 	cs.hold = (
 		weapon == Stance.SWORD and ss.stance == Stance.NONE
 		and Input.is_action_pressed("attack") and _swing_press == _press_id
+		and chain_ready_in == 0.0
 	)
 	ss.tick(delta)
 	if ss.stance == Stance.BOW:
@@ -314,14 +306,14 @@ func _physics_process(delta: float) -> void:
 		)
 
 	sneaking = Input.is_action_pressed("sneak")
-	var ev := cs.advance(delta, false, Input.is_action_just_pressed("dodge"), ss.drain())
+	var ev := cs.advance(delta, false, Input.is_action_just_pressed("dodge"))
 	if ev == "dodge":
 		# §7: dodge beats everything. It is the input most needed under pressure.
 		_exit_stance("dodge")
 		_knock = Vector3.ZERO
 		dodge_dir = wish if wish != Vector3.ZERO else -global_transform.basis.z
 	if ev != "":
-		Metrics.log_event(ev, {"stamina": snappedf(cs.stamina, 0.1)})
+		Metrics.log_event(ev, {"cooldown": snappedf(cs.dodge_ready_in, 0.01)})
 	# A stance cannot survive being staggered.
 	if cs.state == CombatState.STAGGER and ss.stance != Stance.NONE:
 		_exit_stance("stagger")
@@ -383,12 +375,10 @@ func _exit_stance(why: String) -> void:
 	)
 	ss.exit()
 	g.release()
-	cs.regen_timer = cs.regen_delay
 
 
 func _start_swing(press: int) -> void:
-	if not cs.try_attack(link_cost):
-		Metrics.log_event("attack_refused", {"stamina": snappedf(cs.stamina, 0.1)})
+	if not cs.try_attack(0.0):  # a plain swing is free
 		return
 	# A click strikes exactly at the cursor, so snap to it rather than waiting on
 	# the rotation clamp to catch up. Facing then locks for the wind-up.
@@ -398,7 +388,7 @@ func _start_swing(press: int) -> void:
 	debug_event.emit("swing", {
 		"clamped": false, "requested_yaw": strike_yaw, "requested_deg": 0.0, "cancelled": false,
 	})
-	Metrics.log_event("swing_fired", {"cost": link_cost})
+	Metrics.log_event("swing_fired", {})
 
 
 func _face_cursor() -> void:
@@ -408,17 +398,13 @@ func _face_cursor() -> void:
 	strike_yaw = rotation.y
 
 
-# Links a release would chain right now. The first link was paid when the swing
-# started, so it is added back before asking what stamina can afford.
+# Links a release would chain right now.
 func links_now() -> int:
-	return Stance.link_count(
-		cs.charge_seconds(), link_charge_time, sword_max_links, skill_max_links,
-		cs.stamina + link_cost, link_cost
-	)
+	return Stance.link_count(cs.charge_seconds(), link_charge_time, sword_max_links, skill_max_links)
 
 
 func link_cap() -> int:
-	return mini(mini(sword_max_links, skill_max_links), int((cs.stamina + link_cost) / link_cost))
+	return mini(sword_max_links, skill_max_links)
 
 
 # Enemies the chain would visit if released now, in order.
@@ -454,12 +440,12 @@ func _release_charge() -> void:
 	var links := links_now()
 	var path := chain_targets(links)
 	Metrics.log_event("chain_released", {
-		"links": links, "cap": link_cap(), "targets": path.size(), "stamina": snappedf(cs.stamina, 0.1),
+		"links": links, "cap": link_cap(), "targets": path.size(),
 	})
 	if path.is_empty():
 		_face_cursor()
 		return
-	cs.stamina = maxf(0.0, cs.stamina - link_cost * (path.size() - 1))
+	chain_ready_in = chain_cooldown_per_link * path.size()
 	_chain = path
 	link_i = 0
 	_link_t = 0.0
@@ -594,11 +580,6 @@ func apply_knock(v: Vector3) -> void:
 
 func _fire_bow() -> void:
 	var strength := draw_strength
-	if cs.stamina < ss.bow_cost:
-		Metrics.log_event("attack_refused", {"stamina": snappedf(cs.stamina, 0.1)})
-		return
-	# One cost for the whole volley.
-	cs.stamina -= ss.bow_cost
 	var hits := 0
 	var max_pierce := 0
 	# ponytail: who gets hit is decided at release (the preview's answer), and each
@@ -745,17 +726,13 @@ func receive_hit(amount: float) -> String:
 	if chaining():
 		debug_event.emit("taken", {"result": "dodged", "amount": amount, "lost": 0.0})
 		return "dodged"
-	var was_blocking := ss.stance == Stance.BLOCK
 	var hp_before := cs.health
 	var r := ss.resolve_hit(cs, amount)
 	debug_event.emit("taken", {"result": r, "amount": amount, "lost": hp_before - cs.health})
-	if r == "hit" or r == "broken":
+	if r == "hit":
 		_shake(hurt_shake)
 	elif r == "blocked":
 		_shake(hurt_shake * 0.5)
-	if r == "broken" and was_blocking:
-		g.release()
-		Metrics.log_event("stance_exited", {"stance": "block", "why": "broken", "chain": 0, "rejected": g.rejected})
 	return r
 
 

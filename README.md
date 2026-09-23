@@ -4,20 +4,20 @@ Stages 1-2 of `../isola/ISOLA_Combat_Test_Plan.md`, with the click / charged-cha
 sword. **Disposable.** Per §8 what carries forward is the tuning knowledge and the
 numbers, not this code.
 
-Godot **4.7.2 mono** — `/Users/wesleychase/Downloads/Godot_mono.app`.
+Godot **4.7.2 mono** — `/Applications/Godot_mono.app`.
 (`/Applications/Godot.app` is 4.2.1 and cannot open this project.)
 
 ## Run
 
 ```bash
-GODOT=/Users/wesleychase/Downloads/Godot_mono.app/Contents/MacOS/Godot
+GODOT=/Applications/Godot_mono.app/Contents/MacOS/Godot
 
 $GODOT --headless --path . --script res://check.gd   # logic check, prints OK
 $GODOT --headless --path . res://stealth_check.tscn  # stage 5 wake rules, prints STEALTH OK
 $GODOT --editor --path .                             # then F5
 ```
 
-`check.gd` asserts the combat rules that break quietly: commitment, stamina gating,
+`check.gd` asserts the combat rules that break quietly: commitment, enemy stamina pacing, dodge cooldown,
 i-frames, stagger, held charge, chain link count and target path, block, parry. It needs
 no scene and no window.
 
@@ -39,8 +39,8 @@ Facing follows the mouse.
 | Input | Result |
 |---|---|
 | **Click** | One arc swing at the cursor. Base damage and knockback, **never dashes** and never slows or stops your movement: you walk at full speed through the whole swing. Fires on press. A click during a swing is ignored; there is no combo. |
-| **Hold** | The swing pauses at the top of its wind-up and charges. Move at 35%, stamina stops regenerating. The **chain path** is drawn on the ground: yellow rings are locked-in targets, the faint ring is the one the next link would add. |
-| **Release** | Dash-strikes each target on the path in turn: invulnerable, a whole-game hit freeze on every hit, and the last link knocks them flying. No target in range: it goes out as a plain arc. |
+| **Hold** | The swing pauses at the top of its wind-up and charges. Move at 35%. While the chain is on cooldown, holding does nothing extra and the click swing goes out as normal. The **chain path** is drawn on the ground: yellow rings are locked-in targets, the faint ring is the one the next link would add. |
+| **Release** | Starts the chain cooldown, `chain_cooldown_per_link` (1s) × links. Dash-strikes each target on the path in turn: invulnerable, a whole-game hit freeze on every hit, and the last link knocks them flying. No target in range: it goes out as a plain arc. |
 | **Space while charging** | Rolls out. The wind-up before the hold point is still committed. |
 
 **Bow:** hold, pull back to aim, release. Pulling past `bow_draw_threshold` (60px) nocks
@@ -63,7 +63,7 @@ white with an end mark when it hits nothing. Like the chain path, it's always dr
 - **Falloff.** Each earlier pierce costs `pierce_falloff` (15%), compounding: 30 → 25.5 →
   21.7 → 18.4 at full draw.
 - **Volley.** The `arrows` −/+ buttons (or `[`/`]`) set 1–7 arrows, `arrow_spread_deg` (8°)
-  apart around the aim. Each pierces on its own, and the volley costs one `bow_cost`.
+  apart around the aim. Each pierces on its own. The bow is free; the draw time is its only limit.
   It changes live, without restarting the fight.
 
 Verified in a scripted run with 4 enemies in a line and one to the side: a full draw
@@ -71,11 +71,28 @@ previewed Enemy1–4 and landed exactly 30, 25.5, 21.7, 18.4. With 3 arrows, two
 down the row and the third hit the side enemy.
 
 **Links.** One link is free, and each `link_charge_time` (0.35s) held adds another,
-up to the lowest of:
+up to the lower of:
 
 - `sword_max_links` (5), the weapon;
-- `skill_max_links` (3), a plain export until there is a skill system;
-- what stamina can pay at `link_cost` (12) each. A click already paid for one link, and a chain pays for the rest on release.
+- `skill_max_links` (3), a plain export until there is a skill system.
+
+## No stamina — cooldowns (`docs/adr/0001`)
+
+The player has no stamina. Cooldowns are the only limit on actions:
+
+| Action | Limit |
+|---|---|
+| Click swing | Free. Only its own wind-up and recovery pace it. |
+| Charged chain | `chain_cooldown_per_link` (1s) × the links in the chain, from release. A 3-link chain waits 3s. A charge released with no target costs nothing. |
+| Dodge | `dodge_cooldown` (0.65s) from the start of one roll to the next, so 0.25s after the roll ends. |
+| Bow | Free. The draw time is the limit. |
+| Block | Free, but every blocked hit still chips `block_chip` (25%) off health, which never comes back. There is no guard break any more. |
+
+The debug label and HUD show both cooldowns (`cd chain · dodge`). The chain cooldown
+does not yet shrink with skill level, because there is no skill system yet.
+
+**Enemies still use stamina**, but only to space out their swings (`attack_cost` against
+`regen_rate`). It is not a resource the player sees, and it keeps the Stage 2 tuning.
 
 **Targets.** While charging you turn to face the cursor (`charge_turn_rate`, 720°/s). The
 first target is the enemy nearest the **cursor** inside a wedge pointing at it:
@@ -357,17 +374,17 @@ Drawn by `debug_draw.gd`, which only observes; removing the node changes nothing
 - **Enemy**: its attack arc and a faint `standoff` ring.
 - **Bow**: the shot cone while drawing, then a tracer (green hit, red miss). The label shows draw %, pierce budget and arrow count; popups show `pierce n`.
 - **Rings**: cyan i-frames, magenta stagger, grey blocking, white armed parry.
-- **Labels**: weapon, state with timer, links landed, `links n/cap (weapon · skill · stamina)`
-  while charging, `CHAIN n/m` while it plays, health, stamina, and `PUNISH` when an enemy is open.
+- **Labels**: weapon, state with timer, links landed, `links n/cap (weapon · skill)`
+  while charging, `CHAIN n/m` while it plays, health, chain and dodge cooldowns, and `PUNISH` when an enemy is open.
 - **Popups**: damage with `link n/m`, `FINISHER`, and `STAGGER` / `KILL` or
-  `no stagger (committed)`; damage taken, `BLOCK`, `GUARD BREAK`,
+  `no stagger (committed)`; damage taken, `BLOCK`,
   `PARRY`, `DODGED`; arrow strength.
 
 ## Files
 
 | | |
 |---|---|
-| `combat_state.gd` | Action FSM: wind-up/active/recovery/dodge/stagger, stamina, health, held charge, held active window. Pure. Shared by player and enemy. |
+| `combat_state.gd` | Action FSM: wind-up/active/recovery/dodge/stagger, dodge cooldown, enemy stamina, health, held charge, held active window. Pure. Shared by player and enemy. |
 | `stance_state.gd` | Weapon hand: bow/block stances, block/parry resolution, chain link count and target path, arrow pierce path and volley fan. Pure. Player only. |
 | `gesture.gd` | Pull-back drag for the bow; flick detection, now only for parry. Pure. |
 | `camera_relative.gd` | Screen/stick direction → world direction. |
@@ -395,7 +412,7 @@ Starting numbers. Record where you actually land; that record is the deliverable
 | **camera** `pitch_deg` / `distance` / `follow_speed` | 50° / 12.5 / 6.0 | |
 | `windup_time` / `active_time` / `recovery_time` | 0.22 / 0.10 / 0.35 | |
 | `attack_damage` / `attack_reach` / `attack_arc` | 25 / 2.0 / 55° | |
-| `sword_max_links` / `skill_max_links` / `link_cost` | 5 / 3 / 12 | |
+| `sword_max_links` / `skill_max_links` / `chain_cooldown_per_link` | 5 / 3 / 1.0 s | |
 | `link_charge_time` / `charge_move_mult` | 0.35 s / 0.35 | |
 | `chain_first_range` / `chain_first_arc` / `chain_hop_range` | 6 m / 45° / 4.5 m | |
 | `charge_turn_rate` | 720°/s | |
@@ -405,9 +422,8 @@ Starting numbers. Record where you actually land; that record is the deliverable
 | `bow_pierce` / `skill_pierce` / `pierce_falloff` | 2 / 1 / 15% | |
 | `arrow_spread_deg` / **enemy** `toughness` | 8° / 1 | |
 | `attack_knockback` / `link_knockback` / `finisher_knock_mult` | 1.2 m / 2.5 m / 2.5 | |
-| `dodge_time` / `dodge_distance` / `dodge_cost` | 0.40 / 3.5 / 30 | |
+| `dodge_time` / `dodge_distance` / `dodge_cooldown` | 0.40 / 3.5 / 0.65 s | |
 | `iframe_start` / `iframe_end` | 0.05 / 0.28 | |
-| `regen_rate` / `regen_delay` | 45 / 0.55 | |
 | **enemy** `windup_time` / `recovery_time` | 0.60 / 0.60 | |
 | **enemy** `standoff` / `damage` / `move_speed` | 2.15 / 25 / 3.0 | |
 | **enemy** `knockback` | 1.0 m | |
@@ -416,7 +432,7 @@ Starting numbers. Record where you actually land; that record is the deliverable
 
 - **Stage 1:** moving and swinging at nothing feels responsive.
 - **Stage 2:** you fight the enemy ten times in a row without forcing yourself.
-- **Stage 3 — decided:** health never regenerates on its own; only stamina does. Healing
+- **Stage 3 — decided:** health never regenerates on its own. Healing
   will come from consumables, magic or companions (not built in this prototype).
 
 Not built yet: jump/traversal, healing. Parry exists but ships off (`parry_enabled`) until block

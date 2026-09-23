@@ -19,7 +19,7 @@ const DT := 1.0 / 60.0
 
 func _initialize() -> void:
 	_non_cancellable()
-	_stamina_gates()
+	_gates()
 	_iframes()
 	_regen_delay()
 	_damage_and_iframes()
@@ -32,7 +32,6 @@ func _initialize() -> void:
 	_link_count()
 	_chain_path()
 	_bow_drag()
-	_no_regen_while_stanced()
 	_block()
 	_parry_flag()
 	_held_charge()
@@ -73,22 +72,28 @@ func _non_cancellable() -> void:
 	)
 
 
-# 2. Stamina gates both verbs.
-func _stamina_gates() -> void:
+# 2. Stamina paces the enemy's swing; a cooldown, not stamina, gates the dodge
+#    (docs/adr/0001).
+func _gates() -> void:
 	var cs = _fresh()
 	cs.stamina = 1.0
 	assert(cs.advance(DT, true, false) == "attack_refused")
 	assert(cs.state == CombatState.IDLE, "a refused attack still changed state")
-
-	cs = _fresh()
-	cs.stamina = 1.0
-	assert(cs.advance(DT, false, true) == "dodge_refused")
-	assert(cs.state == CombatState.IDLE, "a refused dodge still changed state")
-
 	cs = _fresh()
 	assert(cs.advance(DT, true, false) == "attack", "full stamina could not attack")
 	cs = _fresh()
-	assert(cs.advance(DT, false, true) == "dodge", "full stamina could not dodge")
+	assert(cs.try_attack(0.0), "a free swing was refused")
+
+	cs = _fresh()
+	cs.stamina = 0.0
+	assert(cs.advance(DT, false, true) == "dodge", "stamina still gates the dodge")
+	while cs.state == CombatState.DODGE:
+		cs.advance(DT, false, false)
+	assert(cs.advance(DT, false, true) == "dodge_refused", "dodged again inside the cooldown")
+	assert(cs.state == CombatState.IDLE, "a refused dodge still changed state")
+	while cs.dodge_ready_in > 0.0:
+		cs.advance(DT, false, false)
+	assert(cs.advance(DT, false, true) == "dodge", "the dodge cooldown never ended")
 
 
 # 3. I-frames open late and close before the dodge ends.
@@ -359,57 +364,23 @@ func _bow_drag() -> void:
 	assert(g.drag == Vector2.ZERO and g.drag_strength() == 0.0, "drag survived a new press")
 
 
-# 15. §8/§11-10: no stamina regeneration while any stance is held.
-func _no_regen_while_stanced() -> void:
-	var cs = _fresh()
-	var prev: float = cs.stamina
-	for i in 600:
-		cs.advance(DT, false, false, 12.0)
-		assert(cs.stamina <= prev + 0.0001, "stamina rose while a stance was held")
-		prev = cs.stamina
-	assert(cs.stamina == 0.0, "600 frames of drain did not empty the bar")
-
-	# Releasing the stance lets it come back.
-	for i in 600:
-		cs.advance(DT, false, false, 0.0)
-	assert(is_equal_approx(cs.stamina, cs.stamina_max), "stamina did not recover after release")
-
-	# The enemy's call is unchanged by the new parameter.
-	cs = _fresh()
-	cs.stamina = 50.0
-	cs.advance(DT, false, false)
-	assert(cs.stamina > 50.0, "the default drain broke ordinary regeneration")
-
-
-# 16. §11-7: block absorbs at a stamina cost and breaks when the bar empties.
+# 16. §11-7: block absorbs all but the chip, every hit, and never breaks.
 func _block() -> void:
 	var cs = _fresh()
 	var ss = Stance.new()
 	ss.enter(Stance.BLOCK)
-	cs.stamina = 45.0
-
 	assert(ss.resolve_hit(cs, 100.0) == "blocked", "block did not absorb")
 	assert(is_equal_approx(cs.health, 75.0), "chip was not 25%%: health %f" % cs.health)
-	assert(is_equal_approx(cs.stamina, 25.0), "block did not cost 20 stamina")
-
 	assert(ss.resolve_hit(cs, 100.0) == "blocked", "second block did not absorb")
-	assert(is_equal_approx(cs.stamina, 5.0))
+	assert(ss.resolve_hit(cs, 100.0) == "blocked", "third block did not absorb")
+	assert(is_equal_approx(cs.health, 25.0), "chip did not add up: health %f" % cs.health)
+	assert(ss.stance == Stance.BLOCK and cs.state == CombatState.IDLE, "block broke")
 
-	# Third hit empties the bar: stance drops and the player is staggered.
-	assert(ss.resolve_hit(cs, 100.0) == "broken", "stance did not break at zero stamina")
-	assert(ss.stance == Stance.NONE, "stance survived the break")
-	assert(cs.state == CombatState.STAGGER, "a broken stance did not stagger")
-
-	for i in int(ss.stance_break_time / DT) + 4:
-		cs.advance(DT, false, false)
-	assert(cs.state == CombatState.IDLE, "stance-break stagger never ended")
-
-	# Not blocking: full damage, no stamina cost.
+	# Not blocking: full damage.
 	cs = _fresh()
 	ss = Stance.new()
 	assert(ss.resolve_hit(cs, 40.0) == "hit")
 	assert(is_equal_approx(cs.health, 60.0), "an unblocked hit was reduced")
-	assert(is_equal_approx(cs.stamina, cs.stamina_max), "an unblocked hit cost stamina")
 
 	# i-frames still beat blocking outright.
 	cs = _fresh()
@@ -423,37 +394,33 @@ func _block() -> void:
 
 # 17. §11-8: parry sits behind one flag, off until block feels right.
 func _parry_flag() -> void:
-	# Flag OFF: the refund path is unreachable and a hit still costs and chips.
+	# Flag OFF: a flick does nothing and the hit still chips.
 	var cs = _fresh()
 	var ss = Stance.new()
 	ss.parry_enabled = false
 	ss.enter(Stance.BLOCK)
-	assert(not ss.try_parry(cs), "parried with the flag off")
-	assert(is_equal_approx(cs.stamina, cs.stamina_max), "a disabled parry still cost stamina")
+	assert(not ss.try_parry(), "parried with the flag off")
 	assert(ss.resolve_hit(cs, 100.0) == "blocked", "flag off should fall through to block")
 
-	# Flag ON: the same flick then the same hit refunds and negates.
+	# Flag ON: the same flick then the same hit negates it.
 	cs = _fresh()
 	ss = Stance.new()
 	ss.parry_enabled = true
 	ss.enter(Stance.BLOCK)
-	assert(ss.try_parry(cs), "parry refused with the flag on")
-	assert(is_equal_approx(cs.stamina, cs.stamina_max - ss.parry_cost), "the flick did not cost")
+	assert(ss.try_parry(), "parry refused with the flag on")
 	assert(ss.resolve_hit(cs, 100.0) == "parried", "an armed parry did not fire")
-	assert(is_equal_approx(cs.stamina, cs.stamina_max), "a successful parry was not refunded")
 	assert(is_equal_approx(cs.health, cs.health_max), "a parried hit dealt damage")
 
-	# A flick that never gets hit stays charged - that IS the failure case.
+	# A flick that never gets hit lapses - that IS the failure case.
 	cs = _fresh()
 	ss = Stance.new()
 	ss.parry_enabled = true
 	ss.enter(Stance.BLOCK)
-	ss.try_parry(cs)
+	ss.try_parry()
 	for i in int((ss.parry_window + 0.1) / DT):
 		ss.tick(DT)
 	assert(not ss.parry_armed(), "the parry window never expired")
 	assert(ss.resolve_hit(cs, 100.0) == "blocked", "a lapsed parry still negated the hit")
-	assert(cs.stamina < cs.stamina_max - ss.parry_cost, "a failed parry was refunded anyway")
 
 
 func _advance_until(cs, state: int) -> void:
@@ -514,18 +481,15 @@ func _held_charge() -> void:
 	assert(cs.state == CombatState.STAGGER, "a held charge was not interruptible")
 
 
-# 21. Link count: one link free, one more per link_time held, capped by the lowest
-#     of weapon, skill and what stamina can pay for.
+# 21. Link count: one link free, one more per link_time held, capped by the lower
+#     of weapon and skill.
 func _link_count() -> void:
-	assert(Stance.link_count(0.0, 0.35, 5, 5, 100.0, 12.0) == 1, "zero charge was not one link")
-	assert(Stance.link_count(0.34, 0.35, 5, 5, 100.0, 12.0) == 1, "grew a link early")
-	assert(Stance.link_count(0.36, 0.35, 5, 5, 100.0, 12.0) == 2, "did not grow at link_time")
-	assert(Stance.link_count(0.71, 0.35, 5, 5, 100.0, 12.0) == 3)
-	assert(Stance.link_count(9.0, 0.35, 4, 5, 100.0, 12.0) == 4, "weapon cap did not bind")
-	assert(Stance.link_count(9.0, 0.35, 5, 3, 100.0, 12.0) == 3, "skill cap did not bind")
-	assert(Stance.link_count(9.0, 0.35, 5, 5, 25.0, 12.0) == 2, "stamina cap did not bind")
-	# Broke: still one link, since the first was already paid when the swing began.
-	assert(Stance.link_count(9.0, 0.35, 5, 5, 0.0, 12.0) == 1, "no stamina gave zero links")
+	assert(Stance.link_count(0.0, 0.35, 5, 5) == 1, "zero charge was not one link")
+	assert(Stance.link_count(0.34, 0.35, 5, 5) == 1, "grew a link early")
+	assert(Stance.link_count(0.36, 0.35, 5, 5) == 2, "did not grow at link_time")
+	assert(Stance.link_count(0.71, 0.35, 5, 5) == 3)
+	assert(Stance.link_count(9.0, 0.35, 4, 5) == 4, "weapon cap did not bind")
+	assert(Stance.link_count(9.0, 0.35, 5, 3) == 3, "skill cap did not bind")
 
 
 # 22. Chain path: first target nearest the CURSOR within first_range of the player,
@@ -570,15 +534,6 @@ func _hold_active() -> void:
 	cs.hold_active = false
 	cs.advance(DT, false, false)
 	assert(cs.state == CombatState.RECOVERY, "releasing hold_active did not end ACTIVE")
-
-	# Charging pauses regen, so waiting at the top cannot refill the link cap.
-	cs = _fresh()
-	cs.hold = true
-	cs.try_attack(10.0)
-	cs.stamina = 40.0
-	for i in 120:
-		cs.advance(DT, false, false)
-	assert(cs.charging() and cs.stamina == 40.0, "stamina regenerated while charging")
 
 
 # 24. Arrow pierce: nearest first, every visited enemy is hit, and it passes one

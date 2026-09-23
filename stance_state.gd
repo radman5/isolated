@@ -11,19 +11,11 @@ const CombatState := preload("res://combat_state.gd")
 enum { NONE, SWORD, BOW, BLOCK }
 const NAMES := ["none", "sword", "bow", "block"]
 
-# Tunables, mirrored as @export on player.gd. Values from spec §8/§10, except
-# dodge cost, regen rate and regen delay, which keep the Stage 1 numbers that
-# had actually been played.
-var sword_drain := 12.0
-var bow_drain := 8.0
-var block_drain := 5.0
-var bow_cost := 10.0
-var block_hit_cost := 20.0
+# Tunables, mirrored as @export on player.gd. No stance costs anything to hold
+# or use: the player has no stamina (docs/adr/0001).
 var block_chip := 0.25
-var parry_cost := 15.0
 var parry_window := 0.20
 var parry_enabled := false  # §6: block must pass its gate before this flips
-var stance_break_time := 1.0
 
 var stance := NONE
 var parry_until := -1.0
@@ -41,19 +33,6 @@ func enter(s: int) -> void:
 func exit() -> void:
 	stance = NONE
 	parry_until = -1.0
-
-
-# Non-zero drain IS the predicate "a stance is held", so §8's "no regeneration
-# while any stance is held" needs no second flag and cannot drift out of sync.
-func drain() -> float:
-	match stance:
-		SWORD:
-			return sword_drain
-		BOW:
-			return bow_drain
-		BLOCK:
-			return block_drain
-	return 0.0
 
 
 func tick(delta: float) -> void:
@@ -75,7 +54,10 @@ func disarm_parry() -> void:
 # The damage path for anything that hits the player. Lives here rather than on
 # the node so check.gd can drive it: block, parry and stance-break are exactly
 # the kind of branchy resource logic that breaks quietly.
-# Returns "dodged" | "parried" | "blocked" | "broken" | "hit".
+# Returns "dodged" | "parried" | "blocked" | "hit".
+# ponytail: block has no limit but its chip damage, which attrition makes real.
+# Guard break went with stamina; bring back a hit count if blocking turns out
+# to be a free win.
 func resolve_hit(cs, amount: float) -> String:
 	if cs.invulnerable():
 		return "dodged"
@@ -83,27 +65,17 @@ func resolve_hit(cs, amount: float) -> String:
 		cs.take_damage(amount)
 		return "hit"
 	if parry_armed():
-		# §6: success refunds the flick's cost. Stamina already gates dodging,
-		# charging, swinging, chaining and blocking; parry should reward reading
-		# the enemy rather than consume a sixth slice of the same bar.
-		cs.stamina = minf(cs.stamina_max, cs.stamina + parry_cost)
 		disarm_parry()
 		return "parried"
-	cs.stamina = maxf(0.0, cs.stamina - block_hit_cost)
 	cs.take_damage(amount * block_chip)
-	if cs.stamina <= 0.0:
-		exit()
-		cs.stagger(stance_break_time)
-		return "broken"
 	return "blocked"
 
 
-# Charged at flick time. A flick that never gets hit simply stays charged - that
-# IS the failure case, so there is no failure detector anywhere.
-func try_parry(cs) -> bool:
+# Armed at flick time. A flick that never gets hit simply lapses - that IS the
+# failure case, so there is no failure detector anywhere.
+func try_parry() -> bool:
 	if not parry_enabled or stance != BLOCK:
 		return false
-	cs.stamina = maxf(0.0, cs.stamina - parry_cost)
 	arm_parry()
 	return true
 
@@ -135,12 +107,10 @@ static func move_mult(stance_: int) -> float:
 
 
 # How many enemies a charged strike will chain through if released now. One link
-# is free at any charge; each link_time held adds another, up to the lowest of
-# the weapon's cap, the skill's cap and what stamina can pay for.
-static func link_count(
-	charge_s: float, link_time: float, weapon_cap: int, skill_cap: int, stamina: float, link_cost: float
-) -> int:
-	var cap := mini(mini(weapon_cap, skill_cap), int(stamina / maxf(link_cost, 0.001)))
+# is free at any charge; each link_time held adds another, up to the lower of
+# the weapon's cap and the skill's cap.
+static func link_count(charge_s: float, link_time: float, weapon_cap: int, skill_cap: int) -> int:
+	var cap := mini(weapon_cap, skill_cap)
 	var grown := 1 + int(charge_s / maxf(link_time, 0.001))
 	return clampi(grown, 1, maxi(cap, 1))
 

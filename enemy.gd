@@ -56,7 +56,6 @@ const Hazard := preload("res://traps/hazard.gd")
 @export_group("Knockback")
 @export var knockback := 1.0  # metres a clean hit shoves the player
 @export var block_knock_mult := 0.4
-@export var break_knock_mult := 1.5
 ## How fast a shove bleeds off. The shove covers its distance either way; this
 ## only changes whether it is a snap or a slide.
 @export var knock_friction := 12.0
@@ -317,9 +316,6 @@ func _land_hit() -> void:
 		"blocked":
 			Metrics.log_event("hit_blocked", data)
 			player.apply_knock(push * knockback * block_knock_mult)
-		"broken":
-			Metrics.log_event("stance_broken", data)
-			player.apply_knock(push * knockback * break_knock_mult)
 		"parried":
 			Metrics.log_event("parry_success", data)
 			cs.stagger(parry_stagger)

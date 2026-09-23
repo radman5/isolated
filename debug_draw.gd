@@ -127,9 +127,8 @@ func _draw_player(delta: float) -> void:
 	var head: String = (Stance.NAMES[_p.weapon] if ss.stance == Stance.NONE else ss.name_of()).to_upper()
 	var extra := ""
 	if cs.charging():
-		extra = "  links %d/%d (weapon %d · skill %d · stamina %d)" % [
+		extra = "  links %d/%d (weapon %d · skill %d)" % [
 			_p.links_now(), _p.link_cap(), _p.sword_max_links, _p.skill_max_links,
-			int((cs.stamina + _p.link_cost) / _p.link_cost),
 		]
 	elif ss.stance == Stance.BOW:
 		var s: float = _p.draw_strength
@@ -141,9 +140,9 @@ func _draw_player(delta: float) -> void:
 		flags += "  PARRY"
 	if _p.chaining():
 		flags += "  CHAIN %d/%d" % [_p.link_i + 1, _p._chain.size()]
-	_p_label.text = "%s · %s%s\nchain landed %d%s\nhp %.0f  st %.0f%s" % [
+	_p_label.text = "%s · %s%s\nchain landed %d%s\nhp %.0f  cd chain %.1f dodge %.1f%s" % [
 		head, cs.state_name(), _timer(cs), _p.chain_hits,
-		extra, cs.health, cs.stamina, flags,
+		extra, cs.health, _p.chain_ready_in, cs.dodge_ready_in, flags,
 	]
 
 
@@ -237,11 +236,11 @@ func _on_event(kind: String, d: Dictionary) -> void:
 		"taken":
 			var lost := "-%.0f" % d.lost
 			var text: String = {
-				"hit": lost, "blocked": "BLOCK " + lost, "broken": "GUARD BREAK " + lost,
+				"hit": lost, "blocked": "BLOCK " + lost,
 				"parried": "PARRY", "dodged": "DODGED",
 			}.get(d.result, d.result)
 			var col: Color = {
-				"hit": RED, "blocked": GREY, "broken": MAGENTA, "parried": WHITE, "dodged": CYAN,
+				"hit": RED, "blocked": GREY, "parried": WHITE, "dodged": CYAN,
 			}.get(d.result, WHITE)
 			_popup(_p.global_position, text, col, -1)
 		"shot":
