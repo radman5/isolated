@@ -195,6 +195,43 @@ Collision comes back once you are clear of every enemy's capsule. I-frames are
 unchanged (0.05–0.28s of the 0.40s roll): passing through isn't the same as being
 untouchable.
 
+## Impact feedback — `F2` toggles
+
+Every landed hit is made visible. `fx.gd` holds the effects, `player.gd` fires them,
+`follow_camera.gd` owns the camera kick, and `enemy.gd` owns its own knockback slow-mo.
+Tunables are in the player's **Impact** group.
+
+The game never slows down globally. A global slow-mo (tried first) read as lag, so
+now: the dash stays full speed, every hit gets a **freeze frame**, and only the enemy
+you knocked back **slides in slow motion**, easing back to normal speed.
+
+| Hit | Freeze frame | Victim's knockback | Kick | Also |
+|---|---|---|---|---|
+| Chain link | `hitstop_time` 0.05s | slow-mo for `link_knock_slowmo` 0.6s from `knock_slowmo_scale` 0.25 | `link_shake` 0.35 | sparks along the dash, white flash |
+| Last link | `hitstop_last` 0.10s | slow-mo for `last_knock_slowmo` 1.0s | `last_shake` 0.6 | bigger sparks, flash, gold ground ring |
+| Click swing | `swing_hitstop` 0.04s | normal | `swing_shake` 0.15 | small sparks, flash |
+| Arrow | none | normal | `arrow_shake` 0.2 × draw | sparks along the arrow, flash, green ground ring |
+| You get hit | none | — | `hurt_shake` 0.4 (half when blocked) | |
+
+A slowed knockback covers the same distance, just over more time: in a scripted run,
+2.5m of knock moved 0.97m in its first 150ms against 2.3m unslowed, and both ended up
+about 1.9m away. Only the slide is slowed. The enemy's animation and stagger timer run
+at normal speed.
+
+The kick is a spring, not jitter: the camera is shoved along the hit direction and a
+damped spring (`kick_hz` 7, `kick_damping` 0.45, on the camera) pulls it back with one
+small overshoot. It only moves the camera's position, so aim is unaffected.
+
+`Fx.prewarm` draws every effect once under the floor at load, so their shaders compile
+then and not on the first hit of a fight.
+
+**F2 turns all of it off** and leaves only the chain's original hitstop. Test plan §3
+warns that hit VFX can hide a weak core, so compare with F2 before trusting a "feels
+better". `fx_toggled` is logged.
+
+Physics keeps stepping during a freeze, with delta 0, so `_run_chain` skips those steps.
+Otherwise a dash past its time divides by zero and the player's position goes NaN.
+
 ## Stage 5 — sneaking (`demos/stealth.tscn`)
 
 Get from the start to the green ring at the far end. Four skeletons stand guard:
@@ -382,7 +419,7 @@ Starting numbers. Record where you actually land; that record is the deliverable
 - **Stage 3 — decided:** health never regenerates on its own; only stamina does. Healing
   will come from consumables, magic or companions (not built in this prototype).
 
-Not built yet: jump/traversal, hit VFX, healing. Parry exists but ships off (`parry_enabled`) until block
+Not built yet: jump/traversal, healing. Parry exists but ships off (`parry_enabled`) until block
 feels right.
 
 ## Logs

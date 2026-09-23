@@ -25,7 +25,19 @@ extends Camera3D
 ## the gap in 1/follow_speed seconds.
 @export var follow_speed := 6.0
 
+## Impact kick: a hit shoves the camera along the hit direction and a spring
+## pulls it back with one small overshoot. One clean jolt reads as impact; random
+## jitter reads as the frame rate hitching.
+## Metres per second of kick for a shake amount of 1.
+@export var kick_strength := 14.0
+@export var kick_hz := 7.0
+## 1 = no overshoot, lower = more bounce.
+@export_range(0.05, 1.0) var kick_damping := 0.45
+
 var _target: Node3D
+var _kick := Vector3.ZERO
+var _kick_vel := Vector3.ZERO
+var _last_ms := 0
 var _focus := Vector3.ZERO
 
 
@@ -40,7 +52,22 @@ func _ready() -> void:
 	_apply()
 
 
+# Called by player.gd on impacts. `dir` is the hit direction in the world; zero
+# means a downward bump (getting hit). Position only: the basis never changes, so
+# aim and "up the screen" are untouched.
+func shake(amount: float, dir := Vector3.ZERO) -> void:
+	dir.y = 0.0
+	var d := dir.normalized() if dir.length() > 0.01 else Vector3.DOWN
+	_kick_vel += d * amount * kick_strength
+
+
 func _process(delta: float) -> void:
+	# Real time, not delta: a hitstop sets time_scale to 0 and the shake has to
+	# play through it.
+	var now := Time.get_ticks_msec()
+	var real_dt := minf((now - _last_ms) / 1000.0, 0.1) if _last_ms > 0 else 0.0
+	_last_ms = now
+	_spring(real_dt)
 	if _target:
 		var goal := _target.get_global_transform_interpolated().origin
 		_focus = _focus.lerp(goal, 1.0 - exp(-follow_speed * delta))
@@ -55,3 +82,17 @@ func _apply() -> void:
 	var look := Vector3(_focus.x, look_height, _focus.z)
 	var offset := Vector3(sin(y) * cos(p), sin(p), cos(y) * cos(p)) * distance
 	global_transform = Transform3D(Basis(), look + offset).looking_at(look, Vector3.UP)
+	global_position += _kick
+
+
+# Damped spring, stepped at 240Hz so it is stable at any frame rate.
+func _spring(dt: float) -> void:
+	var w := TAU * kick_hz
+	while dt > 0.0:
+		var h := minf(dt, 1.0 / 240.0)
+		_kick_vel += (-w * w * _kick - 2.0 * kick_damping * w * _kick_vel) * h
+		_kick += _kick_vel * h
+		dt -= h
+	if _kick.length() < 0.0005 and _kick_vel.length() < 0.01:
+		_kick = Vector3.ZERO
+		_kick_vel = Vector3.ZERO

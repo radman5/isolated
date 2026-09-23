@@ -20,6 +20,7 @@ const Stance := preload("res://stance_state.gd")
 const ArrowModel := preload("res://assets/kaykit/weapons/arrow_bow.gltf")
 const Enemy := preload("res://enemy.gd")
 const Hazard := preload("res://traps/hazard.gd")
+const Fx := preload("res://fx.gd")
 
 # For debug_draw.gd only. Gameplay never listens to this; kinds are
 # "swing", "dealt", "taken", "shot".
@@ -106,6 +107,22 @@ signal debug_event(kind: String, data: Dictionary)
 ## Whole-game freeze on each link, and on the last one.
 @export var hitstop_time := 0.05
 @export var hitstop_last := 0.10
+
+@export_group("Impact")
+## Knocked-back enemies slide in slow motion for this long (real seconds), easing
+## back to normal. Only the victims: you, the dash and everyone else stay at full
+## speed. F2 turns all of this off.
+@export var link_knock_slowmo := 0.6
+@export var last_knock_slowmo := 1.0
+@export var knock_slowmo_scale := 0.25
+## A click swing that connects gets a short freeze frame too.
+@export var swing_hitstop := 0.04
+## Camera kick per hit, along the hit direction (see follow_camera.gd).
+@export var link_shake := 0.35
+@export var last_shake := 0.6
+@export var swing_shake := 0.15
+@export var arrow_shake := 0.2
+@export var hurt_shake := 0.4
 ## Move speed while holding a charge, as a fraction of move_speed.
 @export var charge_move_mult := 0.35
 
@@ -197,6 +214,7 @@ var _reject_cool := 0.0
 
 func _ready() -> void:
 	add_to_group("player")
+	Fx.prewarm.call_deferred(get_tree(), global_position)
 	cs.stamina = stamina_max
 	cs.health_max = health_max
 	cs.health = health_max
@@ -250,6 +268,9 @@ func _input(event: InputEvent) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	elif event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_F2:
+		Fx.on = not Fx.on
+		Metrics.log_event("fx_toggled", {"on": Fx.on})
 	# Debug weapon selector, NOT a swap mechanic: gated to a neutral stance, so
 	# no mid-chain swap, which is what §13 and the §4 v2 hook actually forbid.
 	elif event.is_action_pressed("weapon_sword") and ss.stance == Stance.NONE:
@@ -451,7 +472,9 @@ func _release_charge() -> void:
 # followed live, so one that was knocked or walked is still reached.
 func _run_chain(delta: float) -> void:
 	_chain_vel = Vector3.ZERO
-	if not chaining():
+	# Physics still steps during a hitstop, with delta 0. Past the dash time the
+	# divide below is by zero, and an infinite velocity times 0 is NaN.
+	if not chaining() or delta <= 0.0:
 		return
 	var e = _chain[link_i]
 	if not is_instance_valid(e) or e.cs.dead():
@@ -492,7 +515,15 @@ func _land_link(e: Node, dir: Vector3) -> void:
 		"target": e, "knock": push.length(), "finisher": last,
 	})
 	Metrics.log_event("chain_link_hit", {"i": link_i + 1, "id": e.name, "enemy_hp": snappedf(e.cs.health, 0.1)})
-	_hitstop(hitstop_last if last else hitstop_time)
+	if Fx.on:
+		e.slow_mo(last_knock_slowmo if last else link_knock_slowmo, knock_slowmo_scale)
+	if last:
+		_hitstop(hitstop_last)
+		_impact(e, dir, last_shake, 26)
+		Fx.ring(get_tree(), e.global_position, Color(1.0, 0.85, 0.3, 0.9), 3.0)
+	else:
+		_hitstop(hitstop_time)
+		_impact(e, dir, link_shake, 14)
 
 
 func _next_link() -> void:
@@ -529,6 +560,19 @@ func _hitstop(secs: float) -> void:
 		return
 	_hitstop_until = maxi(_hitstop_until, Time.get_ticks_msec() + int(secs * 1000.0))
 	Engine.time_scale = 0.0
+
+
+func _shake(amount: float, dir := Vector3.ZERO) -> void:
+	var cam := get_viewport().get_camera_3d()
+	if Fx.on and cam and cam.has_method("shake"):
+		cam.shake(amount, dir)
+
+
+# Sparks at chest height, a flash, a shake. The shared part of every landed hit.
+func _impact(e: Node, dir: Vector3, shake: float, sparks: int) -> void:
+	Fx.sparks(get_tree(), e.global_position + Vector3(0, 0.3, 0), dir, Color(1.0, 0.85, 0.4), sparks)
+	Fx.flash(e)
+	_shake(shake, dir)
 
 
 # Alive enemies. Queried every time rather than cached, because fight.gd spawns
@@ -619,6 +663,8 @@ func _arrow_hit(e, n: int, dir: Vector3, strength: float) -> void:
 	var dmg := arrow_damage(strength, n)
 	var push := dir * bow_knockback * strength
 	e.take_hit(dmg, hit_stagger * strength, push)
+	_impact(e, dir, arrow_shake * strength, 12)
+	Fx.ring(get_tree(), e.global_position, Color(0.35, 1.0, 0.45, 0.9))
 	debug_event.emit("dealt", {
 		"dmg": dmg, "stagger": hit_stagger * strength, "charge": 0.0, "chain": 0, "cap": 0,
 		"source": "arrow", "pierce": n, "target": e, "knock": push.length(), "finisher": false,
@@ -703,6 +749,10 @@ func receive_hit(amount: float) -> String:
 	var hp_before := cs.health
 	var r := ss.resolve_hit(cs, amount)
 	debug_event.emit("taken", {"result": r, "amount": amount, "lost": hp_before - cs.health})
+	if r == "hit" or r == "broken":
+		_shake(hurt_shake)
+	elif r == "blocked":
+		_shake(hurt_shake * 0.5)
 	if r == "broken" and was_blocking:
 		g.release()
 		Metrics.log_event("stance_exited", {"stance": "block", "why": "broken", "chain": 0, "rejected": g.rejected})
@@ -772,6 +822,9 @@ func _apply_hit() -> void:
 		var push: Vector3 = e.global_position - global_position
 		push.y = 0.0
 		e.take_hit(attack_damage, hit_stagger, push.normalized() * attack_knockback)
+		_impact(e, push.normalized(), swing_shake, 8)
+		if Fx.on:
+			_hitstop(swing_hitstop)
 		debug_event.emit("dealt", {
 			"dmg": attack_damage, "stagger": hit_stagger, "charge": 0.0,
 			"chain": 0, "cap": 0, "source": "sword",

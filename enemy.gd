@@ -93,6 +93,9 @@ var _look_t := 0.0
 var _swing_used := false
 var _was_active := false
 var _knock := Vector3.ZERO
+var _slow_from := 0  # msec, wall clock
+var _slow_until := 0
+var _slow_scale := 1.0
 
 @onready var player: Node = get_node_or_null("../Player")
 
@@ -203,6 +206,23 @@ static func _drop(body: CharacterBody3D) -> void:
 	var tw := body.create_tween()
 	tw.tween_property(body, "position:y", body.position.y - 6.0, 0.7).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
 	tw.tween_callback(body.hide)
+
+
+# Plays this enemy's knockback in slow motion for `secs` of real time, easing
+# back to normal speed. The shove still covers its full distance, just slower.
+# Only the knockback: the AI, stagger timer and everyone else run at full speed.
+func slow_mo(secs: float, scale: float) -> void:
+	_slow_from = Time.get_ticks_msec()
+	_slow_until = _slow_from + int(secs * 1000.0)
+	_slow_scale = scale
+
+
+func _knock_scale() -> float:
+	var now := Time.get_ticks_msec()
+	if now >= _slow_until:
+		return 1.0
+	var t := float(now - _slow_from) / float(_slow_until - _slow_from)
+	return lerpf(_slow_scale, 1.0, smoothstep(0.0, 1.0, t))
 
 
 # Decays exponentially, so a starting speed of distance * friction covers
@@ -320,9 +340,10 @@ func _step_blocked(p: Vector3) -> bool:
 # steering would let the AI walk straight back through its own knockback.
 func _slide(delta: float, target: Vector3) -> void:
 	if _knock.length() > 0.2:
-		velocity.x = _knock.x
-		velocity.z = _knock.z
-		_knock *= exp(-knock_friction * delta)
+		var ks := _knock_scale()
+		velocity.x = _knock.x * ks
+		velocity.z = _knock.z * ks
+		_knock *= exp(-knock_friction * delta * ks)
 	else:
 		_knock = Vector3.ZERO
 		velocity.x = move_toward(velocity.x, target.x, accel * delta)
