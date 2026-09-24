@@ -1,23 +1,59 @@
 extends CanvasLayer
-# Start menu listing every scene in res://demos/. Backspace toggles it from any demo.
-# A new demo is just a .tscn dropped in that folder.
+# Start menu: Start loads Route 1; Demo Scenes (bottom-right) lists every scene in res://demos/.
+# Backspace toggles it from any scene. A new demo is just a .tscn dropped in that folder.
 
 const DIR := "res://demos/"
+const START_SCENE := "res://demos/route1.tscn"
+
+var _start: Button
+var _list: PanelContainer
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	layer = 100
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
-	add_child(panel)
-	var box := VBoxContainer.new()
-	panel.add_child(box)
+
+	var bg := ColorRect.new()
+	bg.color = Color(0.05, 0.06, 0.07)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(bg)
+
+	var center := VBoxContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	center.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	center.grow_vertical = Control.GROW_DIRECTION_BOTH
+	center.add_theme_constant_override("separation", 32)
+	add_child(center)
 	var title := Label.new()
-	title.text = "Demos  (Backspace: this menu)"
-	box.add_child(title)
+	title.text = "Isolated"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 72)
+	center.add_child(title)
+	_start = Button.new()
+	_start.text = "Start"
+	_start.custom_minimum_size = Vector2(260, 64)
+	_start.add_theme_font_size_override("font_size", 28)
+	_start.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_start.pressed.connect(_open.bind(START_SCENE))
+	center.add_child(_start)
+
+	var demos := Button.new()
+	demos.text = "Demo Scenes"
+	demos.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 24)
+	demos.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	demos.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	demos.pressed.connect(func(): _list.visible = not _list.visible)
+	add_child(demos)
+
+	_list = PanelContainer.new()
+	_list.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 24)
+	_list.offset_top -= 48  # sit above the Demo Scenes button
+	_list.offset_bottom -= 48
+	_list.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_list.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	add_child(_list)
+	var box := VBoxContainer.new()
+	_list.add_child(box)
 	# list_directory, not DirAccess: exported builds only have .tscn.remap files on disk.
 	for f in ResourceLoader.list_directory(DIR):
 		if f.ends_with(".tscn"):
@@ -42,4 +78,6 @@ func _show(on: bool) -> void:
 	visible = on
 	get_tree().paused = on
 	if on:
+		_list.visible = false
+		_start.grab_focus.call_deferred()
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
