@@ -268,32 +268,49 @@ better". `fx_toggled` is logged.
 Physics keeps stepping during a freeze, with delta 0, so `_run_chain` skips those steps.
 Otherwise a dash past its time divides by zero and the player's position goes NaN.
 
-## Route 1 graybox (`demos/route1.tscn`)
+## Route 1 (`demos/route1.tscn`)
 
-The whole of Route 1 as grey blocks, from the Glade to Settlement 2, following the "Route 1 shape" and "Route 1 monsters" decisions. **Don't hand-edit the scene.** Change the layout in `tools/gen_route1.py` and run `python3 tools/gen_route1.py`: each stretch of ground is one line in `PIECES`, and walls and trees follow automatically.
+The whole of Route 1, from the Glade to Settlement 2, following the "Route 1 shape" and "Route 1 monsters" decisions. **Don't hand-edit the scene.** It's generated: `python3 tools/gen_route1.py [seed]` (seed 8 is checked in; about 8 seconds).
+
+### How the map is generated
+
+The beats and their order are fixed by the design; where they sit is procedural:
+
+1. **Clearings by constrained random walk.** Each beat's clearing sits one path length on from the last (clearing radii plus 12–24m), turning by a random angle. The turn is mean-reverting (`t * 0.35 + random`, capped at ±55°), so the route winds but keeps heading north. A clearing that crowds an earlier one is rejected and retried.
+2. **Winding paths.** A Catmull-Rom spline through each pair of clearings, with its midpoint pushed sideways by up to 28% of the distance. The path's width drifts with noise between about 3.4 and 6.6m. The path into the ravine stays straight, for the bridge.
+3. **Side nooks.** Three short dead-end spurs (12–16m) off the paths, each ending in a small clearing with a rock and mushrooms.
+4. **A signed distance field.** The walkable ground is a smooth-min union of the clearings (circles) and the path segments (capsules), sampled on a 1m grid: negative inside, positive outside.
+5. **Domain warping.** The field is sampled at a point pushed about by fractal value noise (±2.6m), so no edge is straight or perfectly round.
+6. **The ravine** is a band 8m wide across the whole valley, cut through the field where the straight path crosses it.
+
+At load:
+- `route_terrain.gd` raises banks from the field, paints the ground, and traces the collision walls just outside the walkable edge with **marching squares**. The walls leave a gap exactly as wide as the bridge; the `RavineLip` wall blocks that gap until the tree falls.
+- `route_foliage.gd` plants trees and undergrowth with **Poisson-disc sampling** (Bridson), so there's no grid to spot.
+
+Monsters, the nest, the waystone and signposts are placed in each clearing's own frame (forward along the route). So the nest demo's sneaking lane still runs up the middle of the nest, whichever way the route turns there.
+
+### The beats
 
 | Leg | Beat | What's there |
 |---|---|---|
-| 1 | The Glade | You start here (the arena floor). |
-| 1 | The forest closes in | A 6m path between tree trunks (`forest_edge.gd` draws them along the walls). |
-| 1 | First surprise | A stump barkling on the path. |
-| 1 | Mud clearing | A pair of barklings, and mud that slows you. |
+| 1 | The Glade | You start here. |
+| 1 | First surprise | A stump barkling on the path into the first clearing. |
+| 1 | Mud clearing | A pair of barklings in a round patch of mud that slows you. |
 | — | **Waystone** | Heals you to full and makes leg 2 the restart point (`waystone.gd`). The dead giant tree stands beside it. |
 | 2 | Stealth stretch | The nest: 5 rootkin, the satchel at the heart, and the log. |
 | 2 | Clearing | A group of 3 barklings. |
-| 2 | The ravine | **Placeholder puzzle:** step on the gold ring and the tree bridge drops (`bridge_trigger.gd`). Until then an invisible wall stops you falling in. |
+| 2 | The ravine | **Placeholder puzzle:** step on the gold ring and the tree bridge drops (`bridge_trigger.gd`). |
 | — | Settlement 2 | The green ring. It only counts while you're carrying the satchel. |
 
-**Legs** (`route.gd`, which extends `fight.gd`): health carries through a leg and never regenerates. A death reloads the scene and restarts the current leg: from the Glade before the waystone, from the waystone after it. The leg number is a static, so it survives the reload, and leg 1's monsters (the `leg1` group) are removed when leg 2 restarts. Killing every monster doesn't end the route (`clear_wins = false`); only Settlement 2 does. Finishing the route sets you back to leg 1.
+**Legs** (`route.gd`, which extends `fight.gd`): health carries through a leg and never regenerates. A death reloads the scene and restarts the current leg: from the Glade before the waystone, from the waystone after it. The leg number is a static, so it survives the reload, and leg 1's monsters (the `leg1` group) are removed when leg 2 restarts. Killing every monster doesn't end the route (`clear_wins = false`); only Settlement 2 does.
 
-Verified in a scripted run:
-- Holding left or right on the first path never took the player past |x| = 2.5.
-- The waystone healed 40 to 100 and set leg 2.
-- Dying in leg 2 restarted at the waystone at full health, with 0 leg 1 and 8 leg 2 monsters.
-- Sneaking the nest lane picked up the satchel with 0/5 rootkin awake.
-- The ravine's lip held, the gold ring dropped the bridge, and reaching Settlement 2 ended the route and reset it to leg 1.
+Verified in a scripted run that **walks with real collision** (`move_and_slide`):
+- Pushing in 8 directions for 3s each, from the Glade and from the first path, never took the player past the walkable edge.
+- The waystone healed 40 to 100 and set leg 2. Dying in leg 2 restarted at the waystone, with 0 leg 1 and 8 leg 2 monsters.
+- Sneaking the nest lane, in the stretch's own frame, picked up the satchel with 0/5 rootkin awake.
+- The lip held until the gold ring dropped the bridge. The player then walked 12m across it at a steady height, 10m above the ravine floor, and reaching Settlement 2 ended the route.
 
-The pacing is much shorter than the design's 12 and 15 minutes per leg. That's for the layout review.
+The previous straight layout had a bug: its invisible walls ran across both ends of the ravine and blocked the bridge. The old test moved the player by teleporting, so it never noticed.
 
 ## Route 1 art: terrain, forest and see-through trees
 
@@ -306,9 +323,9 @@ The pacing is much shorter than the design's 12 and 15 minutes per leg. That's f
   - The invisible walls are still the hard edge; the banks are how that edge looks.
 - **Ground shader** (`shaders/terrain_splat.gdshader`): the painted-ramp lighting, grass as the base layer, and triplanar cliff rock wherever the ground is steep. It uses 5 texture samplers, well inside WebGL2's 16.
 - **Forest** (`route_foliage.gd`): a scatter with a fixed seed, so every load looks the same.
-  - Trees in a band on the banks (`tree_spacing`, `forest_depth`), undergrowth along the edge, grass on the floor away from the dirt, and a few rocks and mushrooms.
+  - Trees in a band on the banks, Poisson-disc spaced at least `tree_spacing` apart. Undergrowth along the edge, grass on the floor away from the dirt, and a few rocks and mushrooms. The twisted trees (about 10k triangles each) are left out of the scatter.
   - Hand-placed landmarks: the giant dead tree, the waystone rock and saplings round the nest.
-  - One `MultiMeshInstance3D` per model part per route piece, so each piece culls on its own. Nothing has collision, so rootkin see through leaves.
+  - One `MultiMeshInstance3D` per model part per 48m tile, so each tile culls on its own. Nothing has collision, so rootkin see through leaves.
 - **Foliage shader** (`shaders/foliage.gdshader`): the same painted ramp, alpha-cut leaves and a little wind.
 - **See-through** (`shaders/fade.gdshaderinc` + `occluder_fade.gd`): trees, undergrowth and anything above 1.2m of bank dither away in a soft cylinder from the camera to the player and each awake enemy. Anything within 7m of the camera fades too (`fade_near`), so canopies right under the lens don't fill the screen.
   - It uses discard with a 4×4 Bayer dither, not blending, so it stays in the opaque pass.
@@ -321,18 +338,26 @@ The pacing is much shorter than the design's 12 and 15 minutes per leg. That's f
 - `assets/textures/terrain/`: 3dtextures.me stylized grass, dry mud (used for both the path and the mud), leaves (forest floor) and cliff rock. The site doesn't say whether AI was used.
 - The raw downloads live in `art_src/`, which git and Godot both ignore.
 
-**Measured** on an M1 Pro at 1600×900 with vsync off:
+**Measured** on an M1 Pro at 1600×900 with vsync off, in the editor's debug build:
 
 | Spot | fps |
 |---|---|
-| Glade | 70 |
-| Path | 95 |
-| Mud clearing | 56 |
-| Waystone | 68 |
-| Nest | 54 |
-| Ravine | 105 |
+| Glade | 162 |
+| Stump barkling | 98 |
+| Mud clearing | 81 |
+| Waystone | 155 |
+| Nest | 123 |
+| Ravine / bridge | 160 |
+| Settlement 2 | 161 |
 
-There are 566 trees and about 1,970 grass clumps. The web build hasn't been measured yet. The knobs, cheapest first: `grass_spacing`, `tree_spacing`, `tree_view_range`, and the Sun's `directional_shadow_max_distance`.
+There are 510 trees and about 2,140 grass clumps; the level builds in about 0.9s at load. What got the nest from 45 to 123fps:
+- **Sleeping enemies pause their `AnimationPlayer`.** A playback speed of 0 still cost about 1.6ms of CPU each per frame.
+- **Enemies more than 45m from the camera stop animating** (`animate_range` in `character_view.gd`).
+- **The sun uses 2 shadow cascades instead of 4**, which is plenty at 12.5m.
+- **The terrain doesn't cast shadows.**
+- **Cliff rock is only sampled on steep ground.**
+
+The web build hasn't been measured yet. The knobs, cheapest first: `grass_spacing`, `tree_spacing`, `tree_view_range`, and the Sun's `directional_shadow_max_distance`.
 
 ## Route 1 monsters — stand-ins (`demos/barkling.tscn`, `demos/rootkin.tscn`)
 

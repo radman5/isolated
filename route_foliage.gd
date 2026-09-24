@@ -7,8 +7,10 @@ extends Node3D
 # - Grass and flowers: on the walkable floor, kept off the worn dirt and the mud.
 # - Rocks and mushrooms: sparse, near the edges.
 #
-# One MultiMeshInstance3D per model part per route piece, so each piece culls on
-# its own. Nothing here has collision: the walls are the edge, and rootkin sight
+# Trees and undergrowth are Poisson-disc sampled (Bridson), so no two are closer
+# than a set distance and there's no grid to spot; grass is a jittered grid, fine
+# at its density. One MultiMeshInstance3D per model part per 24m tile, so each
+# tile culls on its own. Nothing here has collision: the walls are the edge, and rootkin sight
 # rays see straight through leaves. Materials are swapped for foliage.gdshader
 # and handed to occluder_fade.gd.
 
@@ -18,12 +20,13 @@ const DIR := "res://assets/quaternius_nature/models/"
 
 @export var terrain_path := NodePath("../Terrain")
 @export var seed := 21
-## Spacing of the tree grid, metres. Lower is a denser forest.
-@export var tree_spacing := 2.8
+## Minimum distance between trees, metres. Lower is a denser forest.
+@export var tree_spacing := 2.6
+@export var tile_size := 48.0
 @export var forest_depth := 11.0
 @export var grass_spacing := 1.15
 @export var grass_view_range := 32.0
-@export var tree_view_range := 42.0
+@export var tree_view_range := 34.0
 ## Hand-placed landmarks, "model|x|z|scale|yaw_degrees": the dead giant tree,
 ## the waystone. Drawn like the rest, so they share the look and the fade.
 @export var landmarks := PackedStringArray()
@@ -36,9 +39,10 @@ const TREES := [
 	["Tree_1", 2, Vector2(0.9, 1.2), 0.015], ["Tree_2", 2, Vector2(0.9, 1.2), 0.015],
 	["Tree_3", 2, Vector2(0.9, 1.2), 0.015], ["Tree_4", 1, Vector2(0.9, 1.1), 0.015],
 	["Tree_5", 2, Vector2(0.9, 1.2), 0.015],
-	["Dead_Tree_2", 1, Vector2(0.5, 0.7), 0.0], ["Dead_Tree_3", 1, Vector2(0.6, 0.8), 0.0],
-	["Twisted_Tree_1", 1, Vector2(0.45, 0.6), 0.008],
+	["Dead_Tree_3", 1, Vector2(0.6, 0.8), 0.0],
 ]
+# ponytail: the twisted trees (about 10k triangles each) stay out of the scatter;
+# they suit a hand-placed landmark, not a forest of hundreds.
 const UNDERGROWTH := [
 	["Bush_1", 3, Vector2(0.8, 1.2), 0.03], ["Bush_with_Flowers_1", 1, Vector2(0.8, 1.1), 0.03],
 	["Fern_1", 3, Vector2(0.14, 0.2), 0.05], ["Plant_Big_1", 2, Vector2(0.35, 0.5), 0.04],
@@ -77,16 +81,53 @@ func _ready() -> void:
 	_build()
 
 
-func _piece_of(z: float) -> int:
-	var best := 0
-	var best_d := INF
-	for i in _terrain.pieces.size():
-		var p: Vector3 = _terrain.pieces[i]
-		var d := maxf(maxf(z - p.x, p.y - z), 0.0)
-		if d < best_d:
-			best_d = d
-			best = i
-	return best
+func _tile_of(x: float, z: float) -> String:
+	return "%d,%d" % [floori(x / tile_size), floori(z / tile_size)]
+
+
+# Bridson's Poisson-disc sampling over a rectangle: points at least r apart.
+func _poisson(rect: Rect2, r: float, tries := 20) -> PackedVector2Array:
+	var cell := r / sqrt(2.0)
+	var gw := int(ceil(rect.size.x / cell))
+	var gh := int(ceil(rect.size.y / cell))
+	var grid := PackedInt32Array()
+	grid.resize(gw * gh)
+	grid.fill(-1)
+	var pts := PackedVector2Array()
+	var active: Array[int] = []
+	var first := rect.position + Vector2(_rng.randf(), _rng.randf()) * rect.size
+	pts.append(first)
+	active.append(0)
+	grid[int((first.y - rect.position.y) / cell) * gw + int((first.x - rect.position.x) / cell)] = 0
+	while not active.is_empty():
+		var ai := _rng.randi() % active.size()
+		var base := pts[active[ai]]
+		var found := false
+		for t in tries:
+			var ang := _rng.randf() * TAU
+			var p := base + Vector2(cos(ang), sin(ang)) * r * (1.0 + _rng.randf())
+			if not rect.has_point(p):
+				continue
+			var gx := int((p.x - rect.position.x) / cell)
+			var gy := int((p.y - rect.position.y) / cell)
+			var ok := true
+			for yy in range(maxi(gy - 2, 0), mini(gy + 3, gh)):
+				for xx in range(maxi(gx - 2, 0), mini(gx + 3, gw)):
+					var q := grid[yy * gw + xx]
+					if q >= 0 and pts[q].distance_squared_to(p) < r * r:
+						ok = false
+						break
+				if not ok:
+					break
+			if ok:
+				grid[gy * gw + gx] = pts.size()
+				active.append(pts.size())
+				pts.append(p)
+				found = true
+				break
+		if not found:
+			active.remove_at(ai)
+	return pts
 
 
 func _pick(table: Array) -> Array:
@@ -106,7 +147,7 @@ func _place(table: Array, x: float, z: float, kind: String) -> void:
 	var s := _rng.randf_range(row[2].x, row[2].y)
 	var rot := Basis(Vector3.UP, _rng.randf() * TAU).scaled(Vector3.ONE * s)
 	var xf := Transform3D(rot, Vector3(x, _terrain.height_at(x, z) - 0.05, z))
-	_add("%d|%s" % [_piece_of(z), row[0]], row[0], row[3], kind, xf)
+	_add("%s|%s" % [_tile_of(x, z), row[0]], row[0], row[3], kind, xf)
 
 
 func _add(key: String, model: String, wind: float, kind: String, xf: Transform3D) -> void:
@@ -117,43 +158,32 @@ func _add(key: String, model: String, wind: float, kind: String, xf: Transform3D
 
 func _scatter() -> void:
 	var t: Node = _terrain
-	var zs := -INF
-	var zn := INF
-	for p in t.pieces:
-		zs = maxf(zs, p.x)
-		zn = minf(zn, p.y)
-	var hw: float = t.grid_half_width - 2
-	# Forest band and undergrowth on a jittered grid over the whole valley.
-	var z := zs + forest_depth
-	while z > zn - forest_depth:
-		var x := -hw
-		while x < hw:
-			var px := x + _rng.randf_range(-0.45, 0.45) * tree_spacing
-			var pz := z + _rng.randf_range(-0.45, 0.45) * tree_spacing
-			var d: float = t.walk_dist(px, pz)
-			if not t.in_ravine(px, pz) and absf(px) < hw:
-				# Densest right at the edge, thinning out into the woods.
-				if d > 1.4 and d < forest_depth and _rng.randf() < lerpf(1.0, 0.55, d / forest_depth):
-					_place(TREES, px, pz, "tree")
-				elif d > 0.1 and d < 2.2 and _rng.randf() < 0.6:
-					_place(UNDERGROWTH, px, pz, "under")
-				elif d > 0.0 and d < 3.0 and _rng.randf() < 0.07:
-					_place(ROCKS, px, pz, "rock")
-			x += tree_spacing
-		z -= tree_spacing
+	var rect := Rect2(t.origin + Vector2(2, 2), Vector2(t.cells) - Vector2(4, 4))
+	# Forest, undergrowth and rocks: Poisson-disc points, sorted by distance.
+	for p in _poisson(rect, tree_spacing):
+		var d: float = t.walk_dist(p.x, p.y)
+		if d <= 0.0 or t.in_ravine(p.x, p.y):
+			continue
+		# Densest right at the edge, thinning out into the woods.
+		if d > 1.4 and d < forest_depth and _rng.randf() < lerpf(1.0, 0.6, d / forest_depth):
+			_place(TREES, p.x, p.y, "tree")
+		elif d < 1.4 and _rng.randf() < 0.75:
+			_place(UNDERGROWTH, p.x, p.y, "under")
+		elif d < 3.0 and _rng.randf() < 0.1:
+			_place(ROCKS, p.x, p.y, "rock")
 	# Grass on the walkable floor, off the worn dirt and the mud.
-	z = zs
-	while z > zn:
-		var x := -hw
-		while x < hw:
+	var z := rect.position.y
+	while z < rect.end.y:
+		var x := rect.position.x
+		while x < rect.end.x:
 			var px := x + _rng.randf_range(-0.5, 0.5) * grass_spacing
 			var pz := z + _rng.randf_range(-0.5, 0.5) * grass_spacing
-			if t.walk_dist(px, pz) == 0.0:
+			if t.sdf(px, pz) < -0.2:
 				var c: Color = t.paint_at(px, pz, 0.0)
 				if c.r < 0.25 and c.g < 0.2 and _rng.randf() < 0.75:
 					_place(GRASS, px, pz, "grass")
 			x += grass_spacing
-		z -= grass_spacing
+		z += grass_spacing
 
 
 # The mesh parts of a model scene, each with its transform relative to the root.

@@ -60,13 +60,17 @@ void fragment() {
 	col = mix(col, mud, paint(COLOR.g, n));
 
 	// Triplanar cliff rock on steep ground, so banks and the ravine don't smear.
-	vec3 an = abs(world_normal);
-	an /= (an.x + an.y + an.z);
-	vec3 cliff = (texture(cliff_tex, world_pos.zy / cliff_size).rgb * an.x
-		+ texture(cliff_tex, world_pos.xz / cliff_size).rgb * an.y
-		+ texture(cliff_tex, world_pos.xy / cliff_size).rgb * an.z) * cliff_tint.rgb;
+	// Only sampled where it can show: most of the ground is flat.
 	float slope = 1.0 - world_normal.y;
-	col = mix(col, cliff, smoothstep(cliff_from, cliff_full, slope + (n - 0.5) * 0.1));
+	float rock = smoothstep(cliff_from, cliff_full, slope + (n - 0.5) * 0.1);
+	if (rock > 0.0) {
+		vec3 an = abs(world_normal);
+		an /= (an.x + an.y + an.z);
+		vec3 cliff = (texture(cliff_tex, world_pos.zy / cliff_size).rgb * an.x
+			+ texture(cliff_tex, world_pos.xz / cliff_size).rgb * an.y
+			+ texture(cliff_tex, world_pos.xy / cliff_size).rgb * an.z) * cliff_tint.rgb;
+		col = mix(col, cliff, rock);
+	}
 
 	ALBEDO = col;
 	ROUGHNESS = 1.0;

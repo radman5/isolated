@@ -145,7 +145,18 @@ func _find_blend_mesh(n: Node) -> MeshInstance3D:
 	return null
 
 
+## Enemies further than this from the camera stop animating. Nobody can see
+## them, and every animated character costs CPU each frame.
+@export var animate_range := 45.0
+
+
 func _process(delta: float) -> void:
+	if is_enemy:
+		var cam := get_viewport().get_camera_3d()
+		if cam and cam.global_position.distance_to(global_position) > animate_range:
+			if _ap.is_playing():
+				_ap.pause()
+			return
 	var cs = _actor.cs
 	var ss = _actor.get("ss")
 	_update_weapons(ss)
@@ -273,8 +284,16 @@ func _drive_idle(ss, entered: bool) -> void:
 	var v: Vector3 = _actor.velocity
 	var speed := Vector2(v.x, v.z).length()
 	if speed < 0.3:
+		if still_while_asleep and not _actor.awake():
+			# Hold the first idle frame with the player paused: a speed of 0 still
+			# costs a full animation update every frame (about 1.6ms each).
+			if _clip != "Skeletons_Idle":
+				_play("Skeletons_Idle", 0.15)
+			elif _ap.is_playing():
+				_ap.pause()
+			return
 		_play_loop("Skeletons_Idle" if is_enemy else "Idle_A", 0.15)
-		_ap.speed_scale = 0.0 if still_while_asleep and not _actor.awake() else 1.0
+		_ap.speed_scale = 1.0
 	elif is_enemy:
 		_play_loop("Skeletons_Walking", 0.15)
 		_ap.speed_scale = speed / walk_speed

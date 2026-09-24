@@ -1,59 +1,89 @@
 extends Node3D
-# The route's ground, built from the layout at load: flat where you walk, banks
-# rising at the edges, and a ravine that drops away. It's one mesh on a 1m grid
-# with a matching HeightMapShape3D, and the vertex colours paint it for
-# terrain_splat.gdshader: R worn dirt, G mud, B leaf litter.
+# The route's ground, built at load from the signed distance field that
+# tools/gen_route1.py generates: negative where you walk, positive outside, in
+# metres, on a 1m grid.
 #
-# tools/gen_route1.py writes the layout into these exports. The invisible walls
-# stay the hard edge; the banks are how that edge looks.
-# ponytail: rebuilt on every load (about 18k vertices, a few milliseconds). Bake
-# it into a resource if the route grows much bigger.
+# - Height: flat where you walk, banks rising with distance outside, and a
+#   ravine that cuts across the valley.
+# - Paint (vertex colours, read by terrain_splat.gdshader): R worn dirt along the
+#   paths' centre lines, G mud, B leaf litter off the walkable ground.
+# - Walls: invisible collision traced just outside the walkable edge with
+#   marching squares, so the edge follows every curve. The bridge's corridor is
+#   left open; the RavineLip wall blocks it until the tree falls.
+# ponytail: rebuilt on every load (a few tens of thousands of cells, well under a
+# second). Bake to a resource if routes get much bigger.
 
 const TerrainShader := preload("res://shaders/terrain_splat.gdshader")
 const Ramp := preload("res://art/painted_ramp.tres")
 
-## (z_south, z_north, width) for each walkable piece, centred on x = 0.
-@export var pieces := PackedVector3Array()
-## (z_south, z_north) of the ravine's gap.
-@export var ravine := Vector2.ZERO
-## (centre_x, centre_z, size_x, size_z) of each mud patch.
-@export var mud := PackedVector4Array()
+## World (x, z) of the field's first cell.
+@export var origin := Vector2.ZERO
+@export var cells := Vector2i.ZERO
+@export var field := PackedFloat32Array()
+## Distance to the nearest path centre line (for the worn dirt).
+@export var path_field := PackedFloat32Array()
+@export var ravine_centre := Vector2.ZERO
+## Unit vector across the ravine, along the path that crosses it.
+@export var ravine_across := Vector2(0, -1)
+@export var ravine_half_width := 0.0
+## (ax, az, bx, bz): the bridge's line, kept open in the walls.
+@export var bridge := Vector4.ZERO
+## (x, z, radius) of each mud patch.
+@export var mud := PackedVector3Array()
 ## (x, z, radius) of worn dirt patches, e.g. round the waystone.
 @export var dirt_spots := PackedVector3Array()
 @export var bank_height := 3.2
 @export var bank_width := 4.0
 @export var ravine_depth := 10.0
-@export var grid_half_width := 36
+## How far outside the walkable edge the invisible walls stand.
+@export var wall_offset := 0.35
 @export var seed := 7
 
 var _noise := FastNoiseLite.new()
-var _z_max := 0.0
-var _z_min := 0.0
 var material: ShaderMaterial
 
 
 func _ready() -> void:
 	_noise.seed = seed
 	_noise.frequency = 0.045
-	for p in pieces:
-		_z_max = maxf(_z_max, p.x)
-		_z_min = minf(_z_min, p.y)
 	_build()
+
+
+func _sample(data: PackedFloat32Array, x: float, z: float, outside: float) -> float:
+	var fx := x - origin.x
+	var fz := z - origin.y
+	if fx < 0.0 or fz < 0.0 or fx >= cells.x - 1 or fz >= cells.y - 1:
+		return outside
+	var ix := int(fx)
+	var iz := int(fz)
+	var tx := fx - ix
+	var tz := fz - iz
+	var i := iz * cells.x + ix
+	var top := lerpf(data[i], data[i + 1], tx)
+	var bottom := lerpf(data[i + cells.x], data[i + cells.x + 1], tx)
+	return lerpf(top, bottom, tz)
+
+
+# Signed distance to the walkable edge: negative inside.
+func sdf(x: float, z: float) -> float:
+	return _sample(field, x, z, 40.0)
 
 
 # Distance (metres, flat) from (x, z) to the nearest walkable ground. 0 inside.
 func walk_dist(x: float, z: float) -> float:
-	var best := INF
-	for p in pieces:
-		var hw := p.z * 0.5
-		var dx := maxf(absf(x) - hw, 0.0)
-		var dz := maxf(maxf(z - p.x, p.y - z), 0.0)
-		best = minf(best, Vector2(dx, dz).length())
-	return best
+	return maxf(sdf(x, z), 0.0)
+
+
+func _ravine_into(x: float, z: float) -> float:
+	# Metres inside the ravine band; negative outside it.
+	if ravine_half_width <= 0.0:
+		return -INF
+	var along := (Vector2(x, z) - ravine_centre).dot(ravine_across)
+	return ravine_half_width - absf(along)
 
 
 func in_ravine(x: float, z: float) -> bool:
-	return z < ravine.x and z > ravine.y
+	return _ravine_into(x, z) > -1.5
 
 
 func height_at(x: float, z: float) -> float:
@@ -64,26 +94,22 @@ func height_at(x: float, z: float) -> float:
 		# A steep bank first, then rolling forest floor further out.
 		h = smoothstep(0.0, bank_width, d) * (bank_height + n * 0.8)
 		h += smoothstep(bank_width, bank_width * 3.0, d) * (1.5 + n * 2.0)
-	if ravine != Vector2.ZERO:
-		# The ravine cuts across the whole valley, banks included.
-		var into := minf(ravine.x - z, z - ravine.y)
-		if into > -1.2:
-			var drop := smoothstep(-1.2, 0.8, into)
-			h = lerpf(h, -ravine_depth + n, drop)
+	var into := _ravine_into(x, z)
+	if into > -1.2:
+		h = lerpf(h, -ravine_depth + n, smoothstep(-1.2, 0.8, into))
 	return h
 
 
 func paint_at(x: float, z: float, d: float) -> Color:
 	var n := _noise.get_noise_2d(x * 3.0, z * 3.0)
-	# Worn dirt: a wandering line down the middle of the route.
-	var wander := sin(z * 0.11) * 0.9 + n * 0.5
-	var path := (1.0 - smoothstep(0.7, 1.7, absf(x - wander))) * (1.0 - smoothstep(0.0, 1.0, d))
+	# Worn dirt along the paths' centre lines, wobbling a little.
+	var pd := _sample(path_field, x, z, 12.0) + n * 0.5
+	var path := (1.0 - smoothstep(0.8, 1.7, pd)) * (1.0 - smoothstep(0.0, 1.0, d))
 	for s in dirt_spots:
 		path = maxf(path, 1.0 - smoothstep(s.z * 0.6, s.z, Vector2(x - s.x, z - s.y).length()))
 	var m := 0.0
 	for r in mud:
-		# An irregular blob inside the mud rectangle, not the rectangle itself.
-		var e := Vector2((x - r.x) / (r.z * 0.5), (z - r.y) / (r.w * 0.5)).length()
+		var e := Vector2(x - r.x, z - r.y).length() / r.z
 		var wobble := _noise.get_noise_2d(x * 1.5 + 40.0, z * 1.5) * 0.35
 		m = maxf(m, 1.0 - smoothstep(0.75, 1.05, e + wobble))
 	# Leaf litter from the edge of the walkable ground outwards.
@@ -91,23 +117,34 @@ func paint_at(x: float, z: float, d: float) -> Color:
 	return Color(path, m, litter, 1.0)
 
 
+# The field the walls follow: the walkable ground plus the bridge's corridor.
+func _wall_field(x: float, z: float) -> float:
+	var d := sdf(x, z)
+	if bridge != Vector4.ZERO:
+		var a := Vector2(bridge.x, bridge.y)
+		var b := Vector2(bridge.z, bridge.w)
+		var p := Vector2(x, z)
+		var t := clampf((p - a).dot(b - a) / (b - a).length_squared(), 0.0, 1.0)
+		# Narrow enough that the walls keep you on the 2.4m-wide bridge.
+		d = minf(d, (p - a.lerp(b, t)).length() - 1.2)
+	return d - wall_offset
+
+
 func _build() -> void:
-	var z0 := int(ceil(_z_max)) + 16
-	var z1 := int(floor(_z_min)) - 16
-	var nx := grid_half_width * 2 + 1
-	var nz := z0 - z1 + 1
+	var nx := cells.x
+	var nz := cells.y
 	var heights := PackedFloat32Array()
 	heights.resize(nx * nz)
 	for iz in nz:
 		for ix in nx:
-			heights[iz * nx + ix] = height_at(ix - grid_half_width, z1 + iz)
+			heights[iz * nx + ix] = height_at(origin.x + ix, origin.y + iz)
 
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for iz in nz:
 		for ix in nx:
-			var x := float(ix - grid_half_width)
-			var z := float(z1 + iz)
+			var x := origin.x + ix
+			var z := origin.y + iz
 			var hl := heights[iz * nx + maxi(ix - 1, 0)]
 			var hr := heights[iz * nx + mini(ix + 1, nx - 1)]
 			var hd := heights[maxi(iz - 1, 0) * nx + ix]
@@ -143,6 +180,9 @@ func _build() -> void:
 	mi.name = "Mesh"
 	mi.mesh = mesh
 	mi.material_override = material
+	# The ground only receives shadows. Casting them drew its 100k-odd triangles
+	# again in every shadow pass for banks that barely shade anything.
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 
 	# HeightMapShape3D is centred on its node, one unit per cell.
@@ -155,5 +195,49 @@ func _build() -> void:
 	var cs := CollisionShape3D.new()
 	cs.shape = shape
 	body.add_child(cs)
-	body.position = Vector3(0, 0, (z0 + z1) * 0.5)
+	body.position = Vector3(origin.x + (nx - 1) * 0.5, 0, origin.y + (nz - 1) * 0.5)
+	add_child(body)
+
+	_build_walls()
+
+
+# Marching squares over the wall field: each cell the edge crosses gets a
+# segment, and each segment becomes a tall two-triangle wall.
+func _build_walls() -> void:
+	var nx := cells.x
+	var nz := cells.y
+	var v := PackedFloat32Array()
+	v.resize(nx * nz)
+	for iz in nz:
+		for ix in nx:
+			v[iz * nx + ix] = _wall_field(origin.x + ix, origin.y + iz)
+	var faces := PackedVector3Array()
+	var lo := -ravine_depth - 3.0
+	var hi := 6.0
+	for iz in nz - 1:
+		for ix in nx - 1:
+			var c := [v[iz * nx + ix], v[iz * nx + ix + 1], v[(iz + 1) * nx + ix + 1], v[(iz + 1) * nx + ix]]
+			var p := [Vector2(ix, iz), Vector2(ix + 1, iz), Vector2(ix + 1, iz + 1), Vector2(ix, iz + 1)]
+			var cut := []
+			for k in 4:
+				var a: float = c[k]
+				var b: float = c[(k + 1) % 4]
+				if (a < 0.0) != (b < 0.0):
+					cut.append((p[k] as Vector2).lerp(p[(k + 1) % 4], a / (a - b)))
+			# Two crossings is one segment; four (a saddle) is two.
+			for k in range(0, cut.size() - 1, 2):
+				var s0: Vector2 = cut[k] + origin
+				var s1: Vector2 = cut[k + 1] + origin
+				faces.append_array([
+					Vector3(s0.x, lo, s0.y), Vector3(s1.x, lo, s1.y), Vector3(s1.x, hi, s1.y),
+					Vector3(s0.x, lo, s0.y), Vector3(s1.x, hi, s1.y), Vector3(s0.x, hi, s0.y),
+				])
+	var shape := ConcavePolygonShape3D.new()
+	shape.backface_collision = true
+	shape.set_faces(faces)
+	var body := StaticBody3D.new()
+	body.name = "Walls"
+	var cs := CollisionShape3D.new()
+	cs.shape = shape
+	body.add_child(cs)
 	add_child(body)
