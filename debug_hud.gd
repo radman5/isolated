@@ -57,4 +57,4 @@ func _process(_delta: float) -> void:
 			]
 	if not _p.carrying.is_empty():
 		text += "\n\nCARRYING  " + ", ".join(_p.carrying.keys())
-	text += "\n\nLMB click swing / hold to charge a chain, release to strike  RMB block  Space dodge  Shift sneak  1 sword  2 shot  3 volley  4 rain\nC = camera-blame   R = restart   Esc = free cursor   -/+ enemies   [/] volley arrows   F1 debug   F2 fx"
+	text += "\n\nLMB click swing / hold to charge a chain, release to strike  RMB block  Space dodge  Shift sneak  1 sword  2 shot  3 volley  4 rain\nC = camera-blame   R = restart   Esc = free cursor   -/+ enemies   [/] volley arrows   F1 debug   F2 fx   E open"

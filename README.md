@@ -289,13 +289,23 @@ At load:
 
 Monsters, the nest, the waystone and signposts are placed in each clearing's own frame (forward along the route). So the nest demo's sneaking lane still runs up the middle of the nest, whichever way the route turns there.
 
+### Running the checks
+
+```bash
+Godot --headless --path . --script res://tools/route1_check.gd      # prints ROUTE OK
+Godot --path . --script res://tools/route1_shots.gd -- /tmp/shots   # screenshots + fps
+```
+
+`route1_check.gd` walks the whole route with real collision, asserting each beat, and ends with `ROUTE OK`. Run it after regenerating the route.
+
 ### The beats
 
 | Leg | Beat | What's there |
 |---|---|---|
 | 1 | The Glade | You start here. |
 | 1 | First surprise | A stump barkling on the path into the first clearing. |
-| 1 | Mud clearing | A pair of barklings in a round patch of mud that slows you. |
+| 1 | The chest | In the side nook just before the mud: `E` (or attack) opens it, and the **bow** rises out. That unlocks hotbar slot 2. |
+| 1 | Mud clearing | Mud fills the whole clearing, so there's no dry way round. The ground sinks 0.35m under a wet surface, so you and the pair of barklings wade in it up to the shins, at 35% speed. Shoot them from the edge with the bow, or wade in. |
 | — | **Waystone** | Heals you to full and makes leg 2 the restart point (`waystone.gd`). The dead giant tree stands beside it. |
 | 2 | Stealth stretch | The nest: 5 rootkin, the satchel at the heart, and the log. |
 | 2 | Clearing | A group of 3 barklings. |
@@ -304,11 +314,23 @@ Monsters, the nest, the waystone and signposts are placed in each clearing's own
 
 **Legs** (`route.gd`, which extends `fight.gd`): health carries through a leg and never regenerates. A death reloads the scene and restarts the current leg: from the Glade before the waystone, from the waystone after it. The leg number is a static, so it survives the reload, and leg 1's monsters (the `leg1` group) are removed when leg 2 restarts. Killing every monster doesn't end the route (`clear_wins = false`); only Settlement 2 does.
 
-Verified in a scripted run that **walks with real collision** (`move_and_slide`):
+### Weapons: the hotbar and locked slots
+
+The hotbar (`weapon_hotbar.gd`, in every demo's HUD) shows the four slots: 1 Sword, 2 Bow, 3 Volley and 4 Rain. The one in hand has a gold border, locked slots are dimmed and say "locked", and volley and rain show their cooldown as a dark fill draining away. Pressing a locked key flashes that slot red.
+
+A scene can lock slots with the player's `locked_weapons`. Route 1 locks `shot`, `volley` and `rain`, so you start with the sword. Every other demo has the full kit.
+- **Unlocking:** the chest (`chest.gd`) unlocks `shot`.
+- **Persistence:** unlocks live in the static `player.unlocked`, so a death keeps the bow and the chest stays open. `route.gd` clears them when a run ends, either at Settlement 2 or by leaving for the menu.
+- **Revises a decision:** the map's "Kit progression" decision had the bow as a Route 2 gift. It's now found on Route 1.
+
+Verified by `tools/route1_check.gd`, which **walks with real collision** (`move_and_slide`):
+- In the mud the player stands 0.35m lower, at 38% of the speed on dry ground.
+- Key 2 is refused (the weapon stays the sword) until the chest is opened with `E`; then key 2 gives the bow, and volley stays locked.
+- After a leg 1 death, the bow is still unlocked and the chest is still open.
 - Pushing in 8 directions for 3s each, from the Glade and from the first path, never took the player past the walkable edge.
 - The waystone healed 40 to 100 and set leg 2. Dying in leg 2 restarted at the waystone, with 0 leg 1 and 8 leg 2 monsters.
 - Sneaking the nest lane, in the stretch's own frame, picked up the satchel with 0/5 rootkin awake.
-- The lip held until the gold ring dropped the bridge. The player then walked 12m across it at a steady height, 10m above the ravine floor, and reaching Settlement 2 ended the route.
+- The lip held until the gold ring dropped the bridge. The player then walked 12m across it at a steady height, 10m above the ravine floor, and reaching Settlement 2 ended the route and cleared the bow for the next run.
 
 The previous straight layout had a bug: its invisible walls ran across both ends of the ravine and blocked the bridge. The old test moved the player by teleporting, so it never noticed.
 

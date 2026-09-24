@@ -187,6 +187,17 @@ const BOW_MODE_NAMES := ["shot", "volley", "rain"]
 # reload after each fight.
 static var arrow_count := 3
 
+## Hotbar slots this scene starts without ("shot", "volley", "rain"): found
+## later, e.g. the bow in Route 1's chest. Empty in the demos: the full kit.
+@export var locked_weapons := PackedStringArray()
+## Slots found so far. Static, so a death's reload keeps them; route.gd clears it
+## when a run ends.
+static var unlocked := {}
+const SLOTS := ["sword", "shot", "volley", "rain"]
+## For the hotbar: the slot a locked key was last pressed for, and when.
+var locked_press := ""
+var locked_press_ms := 0
+
 var cs := CombatState.new()
 var cam_rel := CameraRelative.new()
 var g := Gesture.new()
@@ -292,14 +303,36 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Debug weapon selector, NOT a swap mechanic: gated to a neutral stance, so
 	# no mid-chain swap, which is what §13 and the §4 v2 hook actually forbid.
 	elif event.is_action_pressed("weapon_sword") and ss.stance == Stance.NONE:
-		weapon = Stance.SWORD
+		_select("sword")
 	elif event.is_action_pressed("weapon_bow") and ss.stance == Stance.NONE:
-		weapon = Stance.BOW
-		bow_mode = BowMode.SINGLE
+		_select("shot")
 	elif event is InputEventKey and event.pressed and not event.echo and ss.stance == Stance.NONE \
 			and event.physical_keycode in [KEY_3, KEY_4]:
+		_select("volley" if event.physical_keycode == KEY_3 else "rain")
+
+
+func has_slot(slot: String) -> bool:
+	return not slot in locked_weapons or unlocked.get(slot, false)
+
+
+# The hotbar slot now in hand: "sword", "shot", "volley" or "rain".
+func current_slot() -> String:
+	if weapon == Stance.SWORD:
+		return "sword"
+	return ["shot", "volley", "rain"][bow_mode]
+
+
+func _select(slot: String) -> void:
+	if not has_slot(slot):
+		locked_press = slot
+		locked_press_ms = Time.get_ticks_msec()
+		Metrics.log_event("weapon_locked", {"slot": slot})
+		return
+	if slot == "sword":
+		weapon = Stance.SWORD
+	else:
 		weapon = Stance.BOW
-		bow_mode = BowMode.VOLLEY if event.physical_keycode == KEY_3 else BowMode.RAIN
+		bow_mode = {"shot": BowMode.SINGLE, "volley": BowMode.VOLLEY, "rain": BowMode.RAIN}[slot]
 
 
 func _physics_process(delta: float) -> void:

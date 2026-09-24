@@ -173,6 +173,19 @@ def try_nook(pts, k, side):
     return True
 
 
+# The chest nook (the bow): forced onto the path into the mud clearing, late on
+# it, so the bow turns up just before the barklings you'd rather shoot than wade to.
+chest_path = [b[0] for b in BEATS].index("MudClearing") - 1
+cp_pts = paths[chest_path]
+for frac in (0.66, 0.6, 0.72, 0.55, 0.78):
+    k = int(len(cp_pts) * frac)
+    if any(0 < k < len(cp_pts) - 1 and try_nook(cp_pts, k, side) for side in (1, -1)):
+        break
+else:
+    raise SystemExit("no room for the chest nook before the mud; try another seed")
+chest_nook, chest_from = nooks[0], spurs[0][0]
+candidates = [i for i in candidates if i != chest_path]
+
 for i in candidates:
     if len(nooks) >= NOOKS:
         break
@@ -337,11 +350,19 @@ for name, scene, i, lx, lz, lyaw, extra, group in monsters:
     nodes.append(f'[node name="{name}" parent="." groups=["{group}"] instance=ExtResource("{scene}")]\n'
                  f'transform = {yaw_xf(frame(i)[3] + lyaw, x, 1.05, z)}\n{extra}\n')
 
-# Mud: a round patch in the mud clearing (the terrain paints it).
-mx, mz = local(m, 0, 1)
-MUD = [(round(mx, 2), round(mz, 2), 5.5)]
+# Mud fills the mud clearing to its walkable edges, so there's no dry way round.
+# The terrain sinks the ground there and lays a wet surface just below.
+mx, mz = centres[m]
+mud_r = BEATS[m][1] + 2.0
+MUD = [(round(mx, 2), round(mz, 2), mud_r)]
 nodes.append(f'[node name="Mud" type="Node3D" parent="."]\ntransform = {yaw_xf(0, mx, 0, mz)}\n'
-             'script = ExtResource("zone")\nkind = "slow"\nradius = 5.5\namount = 0.35\ncolour = Color(0, 0, 0, 0)\n\n')
+             f'script = ExtResource("zone")\nkind = "slow"\nradius = {mud_r}\namount = 0.35\ncolour = Color(0, 0, 0, 0)\n\n')
+
+# The chest with the bow, in its nook, facing back down the spur to the path.
+ccx, ccz, _ = chest_nook
+dx_, dz_ = chest_from[0] - ccx, chest_from[1] - ccz
+nodes.append(f'[node name="Chest" type="Node3D" parent="."]\ntransform = {yaw_xf(math.atan2(-dx_, -dz_), ccx, 0, ccz)}\n'
+             'script = ExtResource("chest")\ngives = "shot"\n\n')
 
 # The waystone and the dead giant tree.
 w = idx("WaystoneClearing")
@@ -399,7 +420,8 @@ for k, (lx, lz) in enumerate([(-9, 6), (8, 4), (-10, -5), (11, -4)]):
     x, z = local(n, lx, lz)
     landmarks.append((("Tree_3", "Pine_5", "Tree_5", "Pine_1")[k], x, z, 0.33, k * 50))
 for k, (cx, cz, r) in enumerate(nooks):
-    landmarks.append((("Rock_Medium_2", "Rock_Medium_3", "Rock_Medium_1")[k % 3], cx + r * 0.3, cz - r * 0.2, 0.6, k * 70))
+    if k > 0:  # nook 0 holds the chest instead of a rock
+        landmarks.append((("Rock_Medium_2", "Rock_Medium_3", "Rock_Medium_1")[k % 3], cx + r * 0.3, cz - r * 0.2, 0.6, k * 70))
     landmarks.append(("Mushroom_Laetiporus_1", cx - r * 0.35, cz + r * 0.25, 0.8, k * 40))
 DIRT_SPOTS = [(wx, wz, 3.2), (0, 0, 4.0), (ex, ez, 3.5)]
 
@@ -431,6 +453,7 @@ head = '''[gd_scene format=3]
 [ext_resource type="PackedScene" path="res://rootkin.tscn" id="rootkin"]
 [ext_resource type="Script" path="res://stealth_stretch.gd" id="stretch"]
 [ext_resource type="Script" path="res://pickup.gd" id="pickup"]
+[ext_resource type="Script" path="res://chest.gd" id="chest"]
 [ext_resource type="Script" path="res://waystone.gd" id="waystone"]
 [ext_resource type="Script" path="res://bridge_trigger.gd" id="bridge"]
 [ext_resource type="Script" path="res://traps/hazard_zone.gd" id="zone"]
@@ -472,6 +495,7 @@ visible = false
 
 [node name="Player" parent="." index="7"]
 transform = {yaw_xf(0, gx, 1.05, gz + 6)}
+locked_weapons = PackedStringArray("shot", "volley", "rain")
 
 '''
 out = head + "\n".join(subs) + "\n" + root + "".join(nodes)

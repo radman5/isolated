@@ -14,6 +14,7 @@ extends Node3D
 # second). Bake to a resource if routes get much bigger.
 
 const TerrainShader := preload("res://shaders/terrain_splat.gdshader")
+const MudShader := preload("res://shaders/mud.gdshader")
 const Ramp := preload("res://art/painted_ramp.tres")
 
 ## World (x, z) of the field's first cell.
@@ -32,6 +33,10 @@ const Ramp := preload("res://art/painted_ramp.tres")
 @export var mud := PackedVector3Array()
 ## (x, z, radius) of worn dirt patches, e.g. round the waystone.
 @export var dirt_spots := PackedVector3Array()
+## How far the ground sinks under mud, and where the wet surface sits (both
+## below ground level), so anything standing in it looks half-submerged.
+@export var mud_depth := 0.35
+@export var mud_surface := -0.12
 @export var bank_height := 3.2
 @export var bank_width := 4.0
 @export var ravine_depth := 10.0
@@ -94,10 +99,21 @@ func height_at(x: float, z: float) -> float:
 		# A steep bank first, then rolling forest floor further out.
 		h = smoothstep(0.0, bank_width, d) * (bank_height + n * 0.8)
 		h += smoothstep(bank_width, bank_width * 3.0, d) * (1.5 + n * 2.0)
+	# The mud clearing sinks, easing back up over its last 1.5m and the foot of
+	# the banks.
+	h -= mud_amount(x, z) * mud_depth * (1.0 - smoothstep(0.0, 1.0, d))
 	var into := _ravine_into(x, z)
 	if into > -1.2:
 		h = lerpf(h, -ravine_depth + n, smoothstep(-1.2, 0.8, into))
 	return h
+
+
+# 1 inside a mud patch, easing to 0 over its outer 1.5m.
+func mud_amount(x: float, z: float) -> float:
+	var m := 0.0
+	for r in mud:
+		m = maxf(m, 1.0 - smoothstep(r.z - 1.5, r.z, Vector2(x - r.x, z - r.y).length()))
+	return m
 
 
 func paint_at(x: float, z: float, d: float) -> Color:
@@ -107,11 +123,10 @@ func paint_at(x: float, z: float, d: float) -> Color:
 	var path := (1.0 - smoothstep(0.8, 1.7, pd)) * (1.0 - smoothstep(0.0, 1.0, d))
 	for s in dirt_spots:
 		path = maxf(path, 1.0 - smoothstep(s.z * 0.6, s.z, Vector2(x - s.x, z - s.y).length()))
-	var m := 0.0
-	for r in mud:
-		var e := Vector2(x - r.x, z - r.y).length() / r.z
-		var wobble := _noise.get_noise_2d(x * 1.5 + 40.0, z * 1.5) * 0.35
-		m = maxf(m, 1.0 - smoothstep(0.75, 1.05, e + wobble))
+	# Mud on everything the dip reaches, walkable ground and the foot of the banks,
+	# with a ragged rim.
+	var wobble := _noise.get_noise_2d(x * 1.5 + 40.0, z * 1.5) * 0.25
+	var m := smoothstep(0.25, 0.6, mud_amount(x, z) + wobble) * (1.0 - smoothstep(0.6, 1.6, d))
 	# Leaf litter from the edge of the walkable ground outwards.
 	var litter := smoothstep(0.0, 1.6, d + n * 0.8)
 	return Color(path, m, litter, 1.0)
@@ -199,6 +214,28 @@ func _build() -> void:
 	add_child(body)
 
 	_build_walls()
+	_build_mud()
+
+
+# A wet surface just below ground level over each mud patch. Ground that isn't
+# sunk hides it by plain depth testing, so it only shows in the dip.
+func _build_mud() -> void:
+	for r in mud:
+		var disc := CylinderMesh.new()
+		disc.top_radius = r.z + 0.5
+		disc.bottom_radius = r.z + 0.5
+		disc.height = 0.02
+		disc.radial_segments = 48
+		var mat := ShaderMaterial.new()
+		mat.shader = MudShader
+		mat.set_shader_parameter("ramp", Ramp)
+		var mi := MeshInstance3D.new()
+		mi.name = "MudSurface"
+		mi.mesh = disc
+		mi.material_override = mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.position = Vector3(r.x, mud_surface - 0.01, r.y)
+		add_child(mi)
 
 
 # Marching squares over the wall field: each cell the edge crosses gets a

@@ -9,6 +9,8 @@ extends "res://fight.gd"
 
 static var leg := 1
 
+const Player := preload("res://player.gd")
+
 
 func _ready() -> void:
 	super()
@@ -29,10 +31,17 @@ func _process(delta: float) -> void:
 	super(delta)
 	# Finishing the route starts the next attempt from the Glade again.
 	if _over and _winner in ["sneaked", "escaped"]:
-		leg = 1
+		_new_run()
 
 
 func _exit_tree() -> void:
 	# Leaving for the demo menu mid-route should not strand the next visit in leg 2.
 	if not _over and not player.cs.dead():
-		leg = 1
+		_new_run()
+
+
+# A fresh run: back to leg 1, and without anything found on the way (the bow).
+# A death keeps both.
+static func _new_run() -> void:
+	leg = 1
+	Player.unlocked.clear()

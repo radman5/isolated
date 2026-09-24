@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" path="res://player.gd" id="1_player"]
 [ext_resource type="Script" path="res://debug_hud.gd" id="2_hud"]
+[ext_resource type="Script" path="res://weapon_hotbar.gd" id="11_hotbar"]
 [ext_resource type="Script" path="res://fight.gd" id="4_fight"]
 [ext_resource type="Script" path="res://debug_draw.gd" id="5_debug"]
 [ext_resource type="Script" path="res://follow_camera.gd" id="6_camera"]
@@ -96,3 +97,7 @@ offset_right = 520.0
 offset_bottom = 420.0
 script = ExtResource("2_hud")
 player_path = NodePath("../../Player")
+
+[node name="Hotbar" type="Control" parent="HUD"]
+layout_mode = 3
+script = ExtResource("11_hotbar")
