@@ -295,6 +295,45 @@ Verified in a scripted run:
 
 The pacing is much shorter than the design's 12 and 15 minutes per leg. That's for the layout review.
 
+## Route 1 art: terrain, forest and see-through trees
+
+`demos/route1.tscn` now has real ground, banks and forest. Everything is built at load from the same layout in `tools/gen_route1.py`.
+
+- **Terrain** (`route_terrain.gd`): one mesh on a 1m grid with a matching `HeightMapShape3D`.
+  - Flat wherever you walk. Banks rise about 3m at the edges (`bank_height`, `bank_width`), with rolling forest floor beyond.
+  - The ravine drops 10m across the whole valley.
+  - Vertex colours paint worn dirt down the middle, a mud blob, and leaf litter off the path.
+  - The invisible walls are still the hard edge; the banks are how that edge looks.
+- **Ground shader** (`shaders/terrain_splat.gdshader`): the painted-ramp lighting, grass as the base layer, and triplanar cliff rock wherever the ground is steep. It uses 5 texture samplers, well inside WebGL2's 16.
+- **Forest** (`route_foliage.gd`): a scatter with a fixed seed, so every load looks the same.
+  - Trees in a band on the banks (`tree_spacing`, `forest_depth`), undergrowth along the edge, grass on the floor away from the dirt, and a few rocks and mushrooms.
+  - Hand-placed landmarks: the giant dead tree, the waystone rock and saplings round the nest.
+  - One `MultiMeshInstance3D` per model part per route piece, so each piece culls on its own. Nothing has collision, so rootkin see through leaves.
+- **Foliage shader** (`shaders/foliage.gdshader`): the same painted ramp, alpha-cut leaves and a little wind.
+- **See-through** (`shaders/fade.gdshaderinc` + `occluder_fade.gd`): trees, undergrowth and anything above 1.2m of bank dither away in a soft cylinder from the camera to the player and each awake enemy. Anything within 7m of the camera fades too (`fade_near`), so canopies right under the lens don't fill the screen.
+  - It uses discard with a 4×4 Bayer dither, not blending, so it stays in the opaque pass.
+  - Shadows stay whole.
+  - Sleeping rootkin and stump barklings get no hole, so the fade never gives the nest away.
+- **Look:** `art/route_env.tres` (filmic, warm ambient, fog, saturation 0.72) and `art/painted_ramp.tres`, both from the style test's numbers. `shaders/painted_ramp.gdshader` came from the `prototype/style-test` branch.
+
+**Art sources** (all CC0, licence notes next to the files):
+- `assets/quaternius_nature/`: 33 Quaternius Stylized Nature MegaKit models from Poly Pizza. `tools/repack_quaternius.py` rewrites them to share 11 textures and drop the normal maps, taking them from 62 MB to 11 MB. The author says no generative AI was used.
+- `assets/textures/terrain/`: 3dtextures.me stylized grass, dry mud (used for both the path and the mud), leaves (forest floor) and cliff rock. The site doesn't say whether AI was used.
+- The raw downloads live in `art_src/`, which git and Godot both ignore.
+
+**Measured** on an M1 Pro at 1600×900 with vsync off:
+
+| Spot | fps |
+|---|---|
+| Glade | 70 |
+| Path | 95 |
+| Mud clearing | 56 |
+| Waystone | 68 |
+| Nest | 54 |
+| Ravine | 105 |
+
+There are 566 trees and about 1,970 grass clumps. The web build hasn't been measured yet. The knobs, cheapest first: `grass_spacing`, `tree_spacing`, `tree_view_range`, and the Sun's `directional_shadow_max_distance`.
+
 ## Route 1 monsters — stand-ins (`demos/barkling.tscn`, `demos/rootkin.tscn`)
 
 These are the two monsters from the "Route 1 monsters" decision, standing in on KayKit skeletons until the real models exist. Both demos are the arena with a different `enemy_scene`, so `-`/`=` still sets the count.

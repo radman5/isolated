@@ -5,7 +5,10 @@
 
 The route runs north (towards -z) from the Glade. Each PIECE is a strip of
 ground: (name, south z, north z, width). Walls go along every edge that isn't
-shared with the next piece, and forest_edge.gd draws tree trunks on them.
+shared with the next piece; they're invisible, the hard edge of the route.
+route_terrain.gd raises banks along the same edges and paints the ground, and
+route_foliage.gd plants the forest on them. occluder_fade.gd makes trees and
+banks see-through wherever they hide an actor from the camera.
 Beats follow "Route 1 shape" (#8) and "Route 1 monsters" (#17).
 """
 from pathlib import Path
@@ -64,17 +67,12 @@ def static_box(name, size, pos, mat=None, parent="."):
     return out
 
 
-mat_ground = sub("StandardMaterial3D", albedo_color="Color(0.24, 0.27, 0.2, 1)")
 mat_log = sub("StandardMaterial3D", albedo_color="Color(0.33, 0.25, 0.17, 1)")
-mat_stone = sub("StandardMaterial3D", albedo_color="Color(0.55, 0.6, 0.68, 1)")
 mat_tree = sub("StandardMaterial3D", albedo_color="Color(0.4, 0.36, 0.3, 1)")
 mat_satchel = sub("StandardMaterial3D", albedo_color="Color(0.62, 0.42, 0.2, 1)")
 mat_exit = sub("StandardMaterial3D", transparency="1", shading_mode="0", albedo_color="Color(0.35, 1, 0.45, 0.5)")
 mat_trigger = sub("StandardMaterial3D", transparency="1", shading_mode="0", albedo_color="Color(1, 0.85, 0.3, 0.55)")
 
-# Ground for every piece but the Glade (the arena floor).
-for name, zs, zn, w in PIECES[1:]:
-    nodes.append(static_box(f"Ground{name}", (w, 1, zs - zn), (0, -0.5, (zs + zn) / 2), mat_ground))
 
 # Walls: along both sides of each piece, and across each boundary where the
 # neighbour is narrower. The ravine's lip and far side get walls across the gap
@@ -126,17 +124,13 @@ for name, scene, basis, x, z, extra, group in enemies:
 # The mud clearing's mud.
 nodes.append('[node name="Mud" type="Node3D" parent="."]\n'
              f'transform = {xf(NORTH, 0, 0, -80)}\nscript = ExtResource("zone")\nkind = "slow"\nsize = Vector2(14, 10)\n'
-             'amount = 0.35\ncolour = Color(0.28, 0.22, 0.12, 0.9)\n\n')
+             'amount = 0.35\ncolour = Color(0, 0, 0, 0)\n\n')  # the terrain paints the mud
 
 # The waystone and the dead giant tree.
 nodes.append(f'[node name="Waystone" type="Node3D" parent="."]\ntransform = {xf(NORTH, 0, 0, -107)}\nscript = ExtResource("waystone")\n\n')
-stone_mesh = sub("BoxMesh", size="Vector3(0.8, 2.2, 0.8)")
-nodes.append(f'[node name="MeshInstance3D" type="MeshInstance3D" parent="Waystone"]\ntransform = {xf(NORTH, 0, 1.1, 0)}\nmesh = SubResource("{stone_mesh}")\nsurface_material_override/0 = SubResource("{mat_stone}")\n\n')
 tree_shape = sub("CylinderShape3D", height="14.0", radius="1.3")
-tree_mesh = sub("CylinderMesh", top_radius="0.7", bottom_radius="1.3", height="14.0")
 nodes.append(f'[node name="DeadTree" type="StaticBody3D" parent="."]\ntransform = {xf(NORTH, 5, 7, -110)}\n\n'
-             f'[node name="CollisionShape3D" type="CollisionShape3D" parent="DeadTree"]\nshape = SubResource("{tree_shape}")\n\n'
-             f'[node name="MeshInstance3D" type="MeshInstance3D" parent="DeadTree"]\nmesh = SubResource("{tree_mesh}")\nsurface_material_override/0 = SubResource("{mat_tree}")\n\n')
+             f'[node name="CollisionShape3D" type="CollisionShape3D" parent="DeadTree"]\nshape = SubResource("{tree_shape}")\n\n')
 
 # The nest: the stretch, the log for cover, and the satchel at the heart.
 nodes.append(f'[node name="Stretch" type="Node3D" parent="."]\ntransform = {xf(NORTH, 0, 0, NEST_Z)}\nscript = ExtResource("stretch")\nsize = Vector3(30, 4, 22)\n\n')
@@ -178,7 +172,10 @@ head = '''[gd_scene format=3]
 [ext_resource type="Script" path="res://pickup.gd" id="pickup"]
 [ext_resource type="Script" path="res://waystone.gd" id="waystone"]
 [ext_resource type="Script" path="res://bridge_trigger.gd" id="bridge"]
-[ext_resource type="Script" path="res://forest_edge.gd" id="forest"]
+[ext_resource type="Script" path="res://route_terrain.gd" id="terrain"]
+[ext_resource type="Script" path="res://route_foliage.gd" id="foliage"]
+[ext_resource type="Script" path="res://occluder_fade.gd" id="fade"]
+[ext_resource type="Environment" path="res://art/route_env.tres" id="env"]
 [ext_resource type="Script" path="res://traps/hazard_zone.gd" id="zone"]
 
 '''
@@ -201,10 +198,41 @@ visible = false
 [node name="Player" parent="." index="7"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 12)
 
+[node name="WorldEnvironment" parent="." index="0"]
+environment = ExtResource("env")
+
+[node name="Sun" parent="." index="1"]
+light_color = Color(1, 0.9, 0.72, 1)
+directional_shadow_max_distance = 38.0
+
+[node name="MeshInstance3D" parent="Ground"]
+visible = false
+
 [node name="Forest" type="Node3D" parent="."]
-script = ExtResource("forest")
 
 '''
+def packed(kind, rows):
+    return f"{kind}(" + ", ".join(str(v) for row in rows for v in row) + ")"
+
+
+MUD = [(0, -80, 14, 10)]
+DIRT_SPOTS = [(0, -107, 3.2), (0, 0, 4.0), (0, -200, 3.5)]
+# Landmarks drawn by route_foliage.gd: model, x, z, scale, yaw (degrees).
+LANDMARKS = [
+    ("Dead_Tree_1", 5, -110, 1.0, 20),     # the dead giant tree
+    ("Rock_Medium_1", 0, -107, 0.55, 0),   # the waystone
+    ("Tree_3", -9, -128, 0.35, 0), ("Pine_5", 8, -130, 0.35, 40),  # saplings round the nest
+    ("Tree_5", -10, -139, 0.3, 90), ("Pine_1", 11, -138, 0.3, 10),
+]
+pieces = [(zs, zn, w) for _, zs, zn, w in PIECES]
+nodes.append(f'[node name="Terrain" type="Node3D" parent="."]\nscript = ExtResource("terrain")\n'
+             f'pieces = {packed("PackedVector3Array", pieces)}\nravine = Vector2({RAVINE[0]}, {RAVINE[1]})\n'
+             f'mud = {packed("PackedVector4Array", MUD)}\ndirt_spots = {packed("PackedVector3Array", DIRT_SPOTS)}\n\n')
+landmarks = ", ".join(f'"{m}|{x}|{z}|{sc}|{yaw}"' for m, x, z, sc, yaw in LANDMARKS)
+nodes.append(f'[node name="Foliage" type="Node3D" parent="."]\nscript = ExtResource("foliage")\n'
+             f'landmarks = PackedStringArray({landmarks})\n\n')
+nodes.append('[node name="OccluderFade" type="Node" parent="."]\nscript = ExtResource("fade")\n\n')
+
 out = head + "\n".join(subs) + "\n" + root + "".join(walls) + "".join(nodes)
 Path(__file__).resolve().parent.parent.joinpath("demos/route1.tscn").write_text(out)
 print(f"wrote demos/route1.tscn: {len(PIECES)} pieces, {wall_i} walls, {len(enemies)} monsters")

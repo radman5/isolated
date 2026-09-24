@@ -1,0 +1,8 @@
+Terrain textures from 3dtextures.me — CC0 (https://3dtextures.me/about/). Base colour maps only, 1024x1024.
+
+grass.jpg   Stylized Grass 001       https://3dtextures.me/2020/06/02/stylized-grass-001/
+dirt.jpg    Stylized Dry Mud 001     (used tinted for both the worn path and the mud)
+leaves.jpg  Stylized Leaves 001      (forest floor at the foot of the banks)
+cliff.png   Stylized Cliff Rock 006  https://3dtextures.me/2024/11/28/stylized-cliff-rock-006/
+
+The site doesn't say whether AI tools were used to make these.

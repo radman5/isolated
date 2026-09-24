@@ -1,0 +1,7 @@
+Stylized Nature MegaKit by Quaternius — CC0 1.0 Universal (public domain).
+https://quaternius.itch.io/stylized-nature-megakit
+Downloaded from Poly Pizza (https://poly.pizza/bundle/Stylized-Nature-MegaKit-T34GZFA0fm), CC0.
+The author states no generative AI was used.
+
+Repacked by tools/repack_quaternius.py: each GLB here holds geometry only and
+points at one shared PNG per texture in textures/; normal maps were dropped.
