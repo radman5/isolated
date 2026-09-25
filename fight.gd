@@ -142,6 +142,12 @@ func _change_arrows(d: int) -> void:
 
 
 func _build_controls() -> void:
+	# Started from the menu's Start button: a player, not a tuner. No debug text.
+	if DemoMenu.playing:
+		for n in ["HUD/Label", "DebugDraw"]:
+			var d := get_node_or_null(n)
+			if d:
+				d.queue_free()
 	var rows := VBoxContainer.new()
 	rows.anchor_left = 1.0
 	rows.anchor_right = 1.0
@@ -154,7 +160,10 @@ func _build_controls() -> void:
 		rows.add_child(_row(enemy_label, _change_enemies))
 	_arrow_label.text = "  arrows %d  " % player.arrow_count
 	rows.add_child(_row(_arrow_label, _change_arrows))
-	$HUD.add_child(rows)
+	if DemoMenu.playing:
+		rows.queue_free()
+	else:
+		$HUD.add_child(rows)
 	# ponytail: stock ProgressBar. §3 rules out an attractive one; this one is for reading.
 	_hp_bar.max_value = player.cs.health_max
 	_hp_bar.show_percentage = false

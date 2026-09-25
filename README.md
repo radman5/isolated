@@ -25,7 +25,7 @@ no scene and no window.
 
 Every push to `main` runs `.github/workflows/web.yml`: `check.gd` must print `OK`, then the
 `Web` preset is exported and deployed to GitHub Pages (`https://<user>.github.io/<repo>/`).
-The game opens on a start menu: **Start** plays Route 1, and **Demo Scenes** (bottom-right) lists
+The game opens on a start menu: **Start** plays Route 1 with no debug text, and **Demo Scenes** (bottom-right) lists
 every `.tscn` in `demos/`, so a new demo is just a scene dropped there. `Backspace` brings the menu back.
 
 ## Controls

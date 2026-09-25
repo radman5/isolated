@@ -5,6 +5,8 @@ extends CanvasLayer
 const DIR := "res://demos/"
 const START_SCENE := "res://demos/route1.tscn"
 
+## True when the scene was opened by Start: scenes then drop their debug text.
+var playing := false
 var _start: Button
 var _list: PanelContainer
 
@@ -34,7 +36,9 @@ func _ready() -> void:
 	_start.custom_minimum_size = Vector2(260, 64)
 	_start.add_theme_font_size_override("font_size", 28)
 	_start.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_start.pressed.connect(_open.bind(START_SCENE))
+	_start.pressed.connect(func():
+		_open(START_SCENE)
+		playing = true)
 	center.add_child(_start)
 
 	var demos := Button.new()
@@ -70,6 +74,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _open(path: String) -> void:
+	playing = false
 	_show(false)
 	get_tree().change_scene_to_file(path)
 
